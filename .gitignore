@@ -1,0 +1,33 @@
+# Virtual Environments
+django/
+venv/
+.venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# Django
+*.log
+local_settings.py
+db.sqlite3-journal
+
+# AI Model Weights / Large Binaries (exceeds GitHub 100MB limit)
+*.gguf
+*.bin
+*.pt
+*.safetensors
+*.onnx
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

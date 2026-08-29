@@ -1,31 +1,39 @@
-# Virtual Environments
-django/
-venv/
+﻿# Environments
+.env
 .venv/
+.venv*/
+django/
 env/
 ENV/
+venv/
 
-# Python Cache & Bytecode
+# Python cache & artifacts
 __pycache__/
 *.py[cod]
 *$py.class
-*.pyo
-*.pyd
 .Python
+*.egg-info/
+dist/
+build/
 
 # Django
 *.log
-local_settings.py
+db.sqlite3
 db.sqlite3-journal
+staticfiles/
+backend/staticfiles/
 
-# AI Model Weights / Large Binaries (exceeds GitHub 100MB limit)
+# Serverless & Build
+.vercel/
+
+# Large model binaries
 *.gguf
 *.bin
 *.pt
 *.safetensors
 *.onnx
 
-# IDE & OS files
+# IDE / OS files
 .vscode/
 .idea/
 .DS_Store

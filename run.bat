@@ -1,32 +1,48 @@
 @echo off
-title Starting Jarvis AI Server...
-echo ========================================================
-echo               STARTING JARVIS AI SERVER
-echo ========================================================
-echo.
-
+REM ============================================================
+REM  Jarvis AI - one-click local runner
+REM  Usage: double-click run.bat  (or run it from a terminal)
+REM ============================================================
+setlocal
 cd /d "%~dp0"
 
-:: 1. Check if virtual environment exists
-if not exist "django\Scripts\python.exe" (
-    echo [ERROR] Virtual environment 'django' not found!
-    echo Please make sure the 'django' folder exists in the project root.
-    pause
-    exit /b
+REM --- Create virtualenv on first run ---
+if not exist ".venv-deploy\Scripts\python.exe" (
+    echo [Jarvis] Creating virtual environment...
+    python -m venv .venv-deploy || goto :error
 )
 
-:: 2. Auto-run database migrations to ensure everything is ready
-echo [*] Checking database migrations...
-"django\Scripts\python.exe" "backend\manage.py" migrate --noinput
+REM --- Install/refresh dependencies ---
+echo [Jarvis] Checking dependencies...
+".venv-deploy\Scripts\python.exe" -m pip install -q -r requirements.txt || goto :error
+
+REM --- Load .env into this session ---
+if exist ".env" (
+    for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
+        if not "%%a"=="" if not "%%a:~0,1%"=="#" set "%%a=%%b"
+    )
+) else (
+    echo [Jarvis] WARNING: no .env found - copy .env.example to .env and add GROQ_API_KEY
+)
+
+REM --- Sanity check ---
+if "%GROQ_API_KEY%"=="" (
+    echo [Jarvis] ERROR: GROQ_API_KEY is not set. Put it in the .env file.
+    pause
+    exit /b 1
+)
+
+echo.
+echo ================================================
+echo   Jarvis AI starting on http://127.0.0.1:8000
+echo   Press Ctrl+C to stop.
+echo ================================================
 echo.
 
-:: 3. Open browser automatically after a short 2-second delay
-start "" powershell -NoProfile -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8000/'"
+".venv-deploy\Scripts\python.exe" backend\manage.py runserver 127.0.0.1:8000
+goto :eof
 
-:: 4. Start Django development server
-echo [*] Starting server at http://127.0.0.1:8000/ ...
-echo [*] Press Ctrl+C in this window to stop the server anytime.
+:error
 echo.
-"django\Scripts\python.exe" "backend\manage.py" runserver 127.0.0.1:8000
-
+echo [Jarvis] Failed to start. See the message above.
 pause

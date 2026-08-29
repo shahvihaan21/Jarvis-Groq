@@ -1,3 +1,12 @@
+﻿// ---------------------------------------------------------------------------
+// Jarvis AI — client-side chat logic
+// The full conversation context lives in this JS array and is sent to the
+// (stateless) Django backend with every request. Nothing is stored remotely.
+// ---------------------------------------------------------------------------
+
+let chatHistory = [];          // [{role: 'user'|'assistant', content: '...'}]
+const MAX_HISTORY_TURNS = 12;  // Must match the backend bound
+
 // Markdown rendering & code highlighting helper
 function renderMarkdown(rawText) {
     if (!rawText) return '';
@@ -5,7 +14,6 @@ function renderMarkdown(rawText) {
     const tempContainer = document.createElement('div');
     tempContainer.innerHTML = parsedHtml;
 
-    // Apply Highlight.js syntax highlighting to code blocks
     tempContainer.querySelectorAll('pre code').forEach((block) => {
         hljs.highlightElement(block);
     });
@@ -76,16 +84,13 @@ async function handleSend(e) {
     const prompt = input.value.trim();
     if (!prompt) return;
 
-    const conversationIdInput = document.getElementById('conversationId');
     const container = document.getElementById('messagesContainer');
     const csrfEl = document.querySelector('[name=csrfmiddlewaretoken]');
     const csrfToken = csrfEl ? csrfEl.value : '';
 
-    // Disable controls during request processing
     input.disabled = true;
     if (sendBtn) sendBtn.disabled = true;
 
-    // Hide hero state if present
     const hero = container ? container.querySelector('.hero-state') : null;
     if (hero) hero.remove();
 
@@ -121,7 +126,6 @@ async function handleSend(e) {
     if (container) container.appendChild(aiWrapper);
     scrollToBottom();
 
-    // Reset input
     input.value = '';
 
     try {
@@ -131,9 +135,10 @@ async function handleSend(e) {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': csrfToken
             },
+            // Send the ENTIRE client-side conversation context every time
             body: JSON.stringify({
                 message: prompt,
-                conversation_id: conversationIdInput ? (conversationIdInput.value || null) : null,
+                history: chatHistory,
                 stream: true
             })
         });
@@ -164,10 +169,7 @@ async function handleSend(e) {
                         try {
                             const eventData = JSON.parse(line.substring(6));
                             if (eventData.type === 'init') {
-                                if (conversationIdInput && !conversationIdInput.value && eventData.conversation_id) {
-                                    conversationIdInput.value = eventData.conversation_id;
-                                    window.history.pushState({}, '', `/c/${eventData.conversation_id}/`);
-                                }
+                                // Metadata only — nothing to persist server-side
                             } else if (eventData.type === 'chunk') {
                                 accumulatedText += eventData.delta;
                                 if (msgContentEl) {
@@ -175,8 +177,9 @@ async function handleSend(e) {
                                 }
                                 scrollToBottom();
                             } else if (eventData.type === 'done') {
-                                if (eventData.ai_time && timeLabel) {
-                                    timeLabel.innerText = eventData.ai_time;
+                                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                if (timeLabel) {
+                                    timeLabel.innerText = now;
                                     timeLabel.style.display = 'block';
                                 }
                             } else if (eventData.type === 'error') {
@@ -190,20 +193,23 @@ async function handleSend(e) {
                     }
                 }
             }
+
+            // Persist the completed turn in client-side memory
+            if (accumulatedText) {
+                chatHistory.push({ role: 'user', content: prompt });
+                chatHistory.push({ role: 'assistant', content: accumulatedText });
+                if (chatHistory.length > MAX_HISTORY_TURNS) {
+                    chatHistory = chatHistory.slice(-MAX_HISTORY_TURNS);
+                }
+            }
         } else {
             const data = await response.json();
             if (data.status === 'success') {
-                if (conversationIdInput && !conversationIdInput.value) {
-                    conversationIdInput.value = data.conversation_id;
-                    window.history.pushState({}, '', `/c/${data.conversation_id}/`);
-                }
                 if (msgContentEl) {
                     msgContentEl.innerHTML = renderMarkdown(data.ai_message.content);
                 }
-                if (timeLabel) {
-                    timeLabel.innerText = data.ai_message.created_at;
-                    timeLabel.style.display = 'block';
-                }
+                chatHistory.push({ role: 'user', content: prompt });
+                chatHistory.push({ role: 'assistant', content: data.ai_message.content });
             } else {
                 if (msgContentEl) {
                     msgContentEl.innerHTML = `<div class="text-danger p-2">Error: ${escapeHtml(data.error || 'Failed to generate response.')}</div>`;
@@ -227,7 +233,7 @@ async function handleSend(e) {
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
-    // Initial render of existing message bubbles from backend
+    // Initial render of any server-rendered message bubbles (if present)
     document.querySelectorAll('.msg-content').forEach(el => {
         const rawEl = el.querySelector('.raw-content');
         if (rawEl) {

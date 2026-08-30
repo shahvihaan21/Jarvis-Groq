@@ -29,9 +29,14 @@
                     </span>
                 </div>
 
-                <button type="button" class="btn-new-chat" onclick="window.location.reload();">
+                <button type="button" class="btn-new-chat" onclick="startNewChat();">
                     <i class="fa-solid fa-plus"></i> New Chat
                 </button>
+                <div class="sidebar-actions">
+                    <button type="button" class="btn-tool" onclick="downloadChat()" title="Export chat"><i class="fa-solid fa-download"></i> Export</button>
+                    <button type="button" class="btn-tool" onclick="document.getElementById('importChatInput').click()" title="Import chat"><i class="fa-solid fa-upload"></i> Import</button>
+                    <input id="importChatInput" type="file" accept="application/json" hidden onchange="importChat(event)">
+                </div>
             </div>
 
             <!-- Thread History List (client-side only — history lives in the browser) -->
@@ -57,6 +62,7 @@
                     </h5>
                 </div>
                 <div class="d-flex align-items-center gap-2 text-success fs-7 fw-semibold">
+                    <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><i class="fa-solid fa-sun"></i></button>
                     <span class="d-inline-block rounded-circle bg-success shadow-sm"
                         style="width: 8px; height: 8px; box-shadow: 0 0 8px #00ff87;"></span>
                     <span>{{ model_name|default:"openai/gpt-oss-120b" }} Online</span>
@@ -132,7 +138,8 @@
     </div>
 
     <!-- Scripts: Marked.js for Markdown & Highlight.js for Syntax Highlighting -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <!-- Custom Modular Frontend Script -->
     <script src="{% static 'js/chat.js' %}"></script>

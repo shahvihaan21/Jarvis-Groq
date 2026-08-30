@@ -6,11 +6,17 @@
 
 let chatHistory = [];          // [{role: 'user'|'assistant', content: '...'}]
 const MAX_HISTORY_TURNS = 12;  // Must match the backend bound
+const MAX_MESSAGE_CHARS = 8000;
+
+function safeMarkdown(rawText) {
+    const parsedHtml = marked.parse(rawText, { breaks: true, gfm: true });
+    return DOMPurify.sanitize(parsedHtml, { USE_PROFILES: { html: true } });
+}
 
 // Markdown rendering & code highlighting helper
 function renderMarkdown(rawText) {
     if (!rawText) return '';
-    const parsedHtml = marked.parse(rawText);
+    const parsedHtml = safeMarkdown(rawText);
     const tempContainer = document.createElement('div');
     tempContainer.innerHTML = parsedHtml;
 
@@ -75,6 +81,62 @@ function escapeHtml(text) {
     return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function startNewChat() {
+    chatHistory = [];
+    sessionStorage.removeItem('jarvisChatHistory');
+    window.location.reload();
+}
+
+function downloadChat() {
+    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), messages: chatHistory }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `jarvis-chat-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+}
+
+function importChat(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const imported = JSON.parse(reader.result);
+            const messages = Array.isArray(imported) ? imported : imported.messages;
+            if (!Array.isArray(messages) || messages.length > MAX_HISTORY_TURNS || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || !m.content.trim())) throw new Error('Invalid chat file');
+            chatHistory = messages.map(m => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_CHARS) }));
+            sessionStorage.setItem('jarvisChatHistory', JSON.stringify(chatHistory));
+            window.location.reload();
+        } catch (error) { alert('That file is not a valid Jarvis chat export.'); }
+    };
+    reader.readAsText(file);
+}
+
+function toggleTheme() {
+    const light = document.body.classList.toggle('light-theme');
+    localStorage.setItem('jarvisTheme', light ? 'light' : 'dark');
+    document.getElementById('themeToggle').innerHTML = `<i class="fa-solid fa-${light ? 'moon' : 'sun'}"></i>`;
+}
+
+function restoreChat() {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem('jarvisChatHistory') || '[]');
+        if (!Array.isArray(saved) || !saved.length) return;
+        chatHistory = saved;
+        const container = document.getElementById('messagesContainer');
+        const hero = container && container.querySelector('.hero-state');
+        if (hero) hero.remove();
+        saved.forEach(message => {
+            const wrapper = document.createElement('div');
+            wrapper.className = `msg-wrapper ${message.role === 'user' ? 'user' : 'ai'}`;
+            wrapper.innerHTML = `<div class="avatar"><i class="fa-solid fa-${message.role === 'user' ? 'user' : 'brain'}"></i></div><div class="msg-bubble"><div class="msg-content">${renderMarkdown(message.content)}</div></div>`;
+            container.appendChild(wrapper);
+        });
+    } catch (_) { sessionStorage.removeItem('jarvisChatHistory'); }
+}
+
 async function handleSend(e) {
     if (e) e.preventDefault();
     const input = document.getElementById('promptInput');
@@ -83,6 +145,8 @@ async function handleSend(e) {
 
     const prompt = input.value.trim();
     if (!prompt) return;
+    if (prompt.length > MAX_MESSAGE_CHARS) { alert(`Please keep messages under ${MAX_MESSAGE_CHARS} characters.`); return; }
+    const requestId = crypto.randomUUID();
 
     const container = document.getElementById('messagesContainer');
     const csrfEl = document.querySelector('[name=csrfmiddlewaretoken]');
@@ -139,6 +203,7 @@ async function handleSend(e) {
             body: JSON.stringify({
                 message: prompt,
                 history: chatHistory,
+                request_id: requestId,
                 stream: true
             })
         });
@@ -201,6 +266,7 @@ async function handleSend(e) {
                 if (chatHistory.length > MAX_HISTORY_TURNS) {
                     chatHistory = chatHistory.slice(-MAX_HISTORY_TURNS);
                 }
+                sessionStorage.setItem('jarvisChatHistory', JSON.stringify(chatHistory));
             }
         } else {
             const data = await response.json();
@@ -210,6 +276,7 @@ async function handleSend(e) {
                 }
                 chatHistory.push({ role: 'user', content: prompt });
                 chatHistory.push({ role: 'assistant', content: data.ai_message.content });
+                sessionStorage.setItem('jarvisChatHistory', JSON.stringify(chatHistory));
             } else {
                 if (msgContentEl) {
                     msgContentEl.innerHTML = `<div class="text-danger p-2">Error: ${escapeHtml(data.error || 'Failed to generate response.')}</div>`;
@@ -233,6 +300,9 @@ async function handleSend(e) {
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
+    marked.setOptions({ headerIds: false, mangle: false });
+    if (localStorage.getItem('jarvisTheme') === 'light') toggleTheme();
+    restoreChat();
     // Initial render of any server-rendered message bubbles (if present)
     document.querySelectorAll('.msg-content').forEach(el => {
         const rawEl = el.querySelector('.raw-content');

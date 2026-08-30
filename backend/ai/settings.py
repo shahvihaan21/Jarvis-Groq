@@ -42,12 +42,14 @@ if "https://*.vercel.app" not in CSRF_TRUSTED_ORIGINS:
 
 INSTALLED_APPS = [
     "django.contrib.staticfiles",
+    "corsheaders",
     "todo",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -92,6 +94,19 @@ STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
+}
+WHITENOISE_MAX_AGE = 3600
+WHITENOISE_MANIFEST_STRICT = False
+
+# Empty by default keeps cross-origin access disabled until explicitly configured.
+CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"json": {"()": "pythonjsonlogger.jsonlogger.JsonFormatter"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "json"}},
+    "loggers": {"todo": {"handlers": ["console"], "level": "INFO", "propagate": False}},
 }
 
 # ---------------------------------------------------------------------------

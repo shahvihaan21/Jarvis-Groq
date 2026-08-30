@@ -99,7 +99,7 @@ Messages are limited to 8,000 characters, request bodies to 256 KB, and the endp
 is limited to 10 requests per minute per IP. Reusing a request ID is rejected to
 prevent accidental duplicate submissions.
 
-Run `python backend/validate_env.py` before deployment to validate `.env`.
+Run `python scripts/validate_env.py` before deployment to validate `.env`.
 Markdown output is sanitized in the browser with DOMPurify, and static assets are
 served with compression and a one-hour cache lifetime. Configure
 `CORS_ALLOWED_ORIGINS` explicitly when the frontend is hosted on another origin.

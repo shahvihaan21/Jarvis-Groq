@@ -1,6 +1,6 @@
 """Validate required deployment environment variables.
 
-Usage: python backend/validate_env.py
+Usage: python scripts/validate_env.py
 """
 import os
 import sys

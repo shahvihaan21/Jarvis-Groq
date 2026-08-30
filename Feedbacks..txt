@@ -1,0 +1,10 @@
+# 🤖 Jarvis-Groq — Feedback & Review
+
+Thanks for trying **Jarvis-Groq!** 🚀  
+Your feedback helps improve the project. Feel free to Enter your Feedback in the Follwing Format
+
+ **Name:** 
+- **GitHub:** 
+- **Contact:** 
+- **Date/Time:** 
+- **Feedback:**

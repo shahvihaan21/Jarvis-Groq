@@ -1,316 +1,49 @@
-﻿// ---------------------------------------------------------------------------
-// Jarvis AI — client-side chat logic
-// The full conversation context lives in this JS array and is sent to the
-// (stateless) Django backend with every request. Nothing is stored remotely.
-// ---------------------------------------------------------------------------
-
-let chatHistory = [];          // [{role: 'user'|'assistant', content: '...'}]
-const MAX_HISTORY_TURNS = 12;  // Must match the backend bound
-const MAX_MESSAGE_CHARS = 8000;
-
-function safeMarkdown(rawText) {
-    const parsedHtml = marked.parse(rawText, { breaks: true, gfm: true });
-    return DOMPurify.sanitize(parsedHtml, { USE_PROFILES: { html: true } });
-}
-
-// Markdown rendering & code highlighting helper
-function renderMarkdown(rawText) {
-    if (!rawText) return '';
-    const parsedHtml = safeMarkdown(rawText);
-    const tempContainer = document.createElement('div');
-    tempContainer.innerHTML = parsedHtml;
-
-    tempContainer.querySelectorAll('pre code').forEach((block) => {
-        hljs.highlightElement(block);
-    });
-
-    addCopyButtons(tempContainer);
-    return tempContainer.innerHTML;
-}
-
-function scrollToBottom() {
-    const container = document.getElementById('messagesContainer');
-    if (container) {
-        container.scrollTop = container.scrollHeight;
-    }
-}
-
-function checkEnter(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        const chatForm = document.getElementById('chatForm');
-        if (chatForm && typeof chatForm.requestSubmit === 'function') {
-            chatForm.requestSubmit();
-        } else {
-            handleSend(e);
-        }
-    }
-}
-
-function sendStarterPrompt(text) {
-    const input = document.getElementById('promptInput');
-    if (!input) return;
-    input.value = text;
-    const chatForm = document.getElementById('chatForm');
-    if (chatForm && typeof chatForm.requestSubmit === 'function') {
-        chatForm.requestSubmit();
-    } else {
-        handleSend(new Event('submit'));
-    }
-}
-
-function addCopyButtons(container) {
-    container.querySelectorAll('pre').forEach(pre => {
-        if (pre.querySelector('.copy-btn')) return;
-        const btn = document.createElement('button');
-        btn.className = 'copy-btn';
-        btn.type = 'button';
-        btn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy';
-        btn.onclick = (e) => {
-            e.preventDefault();
-            const code = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
-            navigator.clipboard.writeText(code);
-            btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
-            setTimeout(() => { btn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy'; }, 2000);
-        };
-        pre.appendChild(btn);
-    });
-}
-
-function escapeHtml(text) {
-    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function startNewChat() {
-    chatHistory = [];
-    sessionStorage.removeItem('jarvisChatHistory');
-    window.location.reload();
-}
-
-function downloadChat() {
-    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), messages: chatHistory }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `jarvis-chat-${Date.now()}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-}
-
-function importChat(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-        try {
-            const imported = JSON.parse(reader.result);
-            const messages = Array.isArray(imported) ? imported : imported.messages;
-            if (!Array.isArray(messages) || messages.length > MAX_HISTORY_TURNS || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || !m.content.trim())) throw new Error('Invalid chat file');
-            chatHistory = messages.map(m => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_CHARS) }));
-            sessionStorage.setItem('jarvisChatHistory', JSON.stringify(chatHistory));
-            window.location.reload();
-        } catch (error) { alert('That file is not a valid Jarvis chat export.'); }
-    };
-    reader.readAsText(file);
-}
-
-function toggleTheme() {
-    const light = document.body.classList.toggle('light-theme');
-    localStorage.setItem('jarvisTheme', light ? 'light' : 'dark');
-    document.getElementById('themeToggle').innerHTML = `<i class="fa-solid fa-${light ? 'moon' : 'sun'}"></i>`;
-}
-
-function restoreChat() {
-    try {
-        const saved = JSON.parse(sessionStorage.getItem('jarvisChatHistory') || '[]');
-        if (!Array.isArray(saved) || !saved.length) return;
-        chatHistory = saved;
-        const container = document.getElementById('messagesContainer');
-        const hero = container && container.querySelector('.hero-state');
-        if (hero) hero.remove();
-        saved.forEach(message => {
-            const wrapper = document.createElement('div');
-            wrapper.className = `msg-wrapper ${message.role === 'user' ? 'user' : 'ai'}`;
-            wrapper.innerHTML = `<div class="avatar"><i class="fa-solid fa-${message.role === 'user' ? 'user' : 'brain'}"></i></div><div class="msg-bubble"><div class="msg-content">${renderMarkdown(message.content)}</div></div>`;
-            container.appendChild(wrapper);
-        });
-    } catch (_) { sessionStorage.removeItem('jarvisChatHistory'); }
-}
-
-async function handleSend(e) {
-    if (e) e.preventDefault();
-    const input = document.getElementById('promptInput');
-    const sendBtn = document.getElementById('sendBtn');
-    if (!input) return;
-
-    const prompt = input.value.trim();
-    if (!prompt) return;
-    if (prompt.length > MAX_MESSAGE_CHARS) { alert(`Please keep messages under ${MAX_MESSAGE_CHARS} characters.`); return; }
-    const requestId = crypto.randomUUID();
-
-    const container = document.getElementById('messagesContainer');
-    const csrfEl = document.querySelector('[name=csrfmiddlewaretoken]');
-    const csrfToken = csrfEl ? csrfEl.value : '';
-
-    input.disabled = true;
-    if (sendBtn) sendBtn.disabled = true;
-
-    const hero = container ? container.querySelector('.hero-state') : null;
-    if (hero) hero.remove();
-
-    // Append User Message Bubble
-    const userWrapper = document.createElement('div');
-    userWrapper.className = 'msg-wrapper user';
-    userWrapper.innerHTML = `
-        <div class="avatar"><i class="fa-solid fa-user"></i></div>
-        <div class="msg-bubble">
-            <div class="msg-content">${renderMarkdown(prompt)}</div>
-            <div class="text-end text-secondary fs-7 mt-2" style="font-size: 0.72rem; color: #6ee7b7 !important;">Now</div>
-        </div>
-    `;
-    if (container) container.appendChild(userWrapper);
-
-    // Append AI Typing Placeholder Bubble
-    const aiWrapper = document.createElement('div');
-    aiWrapper.className = 'msg-wrapper ai';
-    aiWrapper.id = 'aiTypingBubble';
-    aiWrapper.innerHTML = `
-        <div class="avatar"><i class="fa-solid fa-brain"></i></div>
-        <div class="msg-bubble">
-            <div class="msg-content">
-                <div class="typing-indicator">
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                </div>
-            </div>
-            <div class="ai-time-label text-end text-secondary fs-7 mt-2" style="font-size: 0.72rem; color: #6ee7b7 !important; display: none;"></div>
-        </div>
-    `;
-    if (container) container.appendChild(aiWrapper);
-    scrollToBottom();
-
-    input.value = '';
-
-    try {
-        const response = await fetch('/api/chat/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': csrfToken
-            },
-            // Send the ENTIRE client-side conversation context every time
-            body: JSON.stringify({
-                message: prompt,
-                history: chatHistory,
-                request_id: requestId,
-                stream: true
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server returned ${response.status}`);
-        }
-
-        const contentType = response.headers.get('content-type') || '';
-        const msgContentEl = aiWrapper.querySelector('.msg-content');
-        const timeLabel = aiWrapper.querySelector('.ai-time-label');
-
-        if (contentType.includes('text/event-stream')) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let accumulatedText = '';
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const eventData = JSON.parse(line.substring(6));
-                            if (eventData.type === 'init') {
-                                // Metadata only — nothing to persist server-side
-                            } else if (eventData.type === 'chunk') {
-                                accumulatedText += eventData.delta;
-                                if (msgContentEl) {
-                                    msgContentEl.innerHTML = renderMarkdown(accumulatedText);
-                                }
-                                scrollToBottom();
-                            } else if (eventData.type === 'done') {
-                                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                if (timeLabel) {
-                                    timeLabel.innerText = now;
-                                    timeLabel.style.display = 'block';
-                                }
-                            } else if (eventData.type === 'error') {
-                                if (msgContentEl) {
-                                    msgContentEl.innerHTML = `<div class="text-danger p-2">Error: ${escapeHtml(eventData.error)}</div>`;
-                                }
-                            }
-                        } catch (e) {
-                            console.error("Event parse error", e);
-                        }
-                    }
-                }
-            }
-
-            // Persist the completed turn in client-side memory
-            if (accumulatedText) {
-                chatHistory.push({ role: 'user', content: prompt });
-                chatHistory.push({ role: 'assistant', content: accumulatedText });
-                if (chatHistory.length > MAX_HISTORY_TURNS) {
-                    chatHistory = chatHistory.slice(-MAX_HISTORY_TURNS);
-                }
-                sessionStorage.setItem('jarvisChatHistory', JSON.stringify(chatHistory));
-            }
-        } else {
-            const data = await response.json();
-            if (data.status === 'success') {
-                if (msgContentEl) {
-                    msgContentEl.innerHTML = renderMarkdown(data.ai_message.content);
-                }
-                chatHistory.push({ role: 'user', content: prompt });
-                chatHistory.push({ role: 'assistant', content: data.ai_message.content });
-                sessionStorage.setItem('jarvisChatHistory', JSON.stringify(chatHistory));
-            } else {
-                if (msgContentEl) {
-                    msgContentEl.innerHTML = `<div class="text-danger p-2">Error: ${escapeHtml(data.error || 'Failed to generate response.')}</div>`;
-                }
-            }
-        }
-    } catch (err) {
-        console.error(err);
-        const bubble = aiWrapper.querySelector('.msg-bubble');
-        if (bubble) {
-            bubble.innerHTML = `<div class="text-danger p-2">Network error connecting to Jarvis AI server.</div>`;
-        }
-    } finally {
-        input.disabled = false;
-        if (sendBtn) sendBtn.disabled = false;
-        input.focus();
-    }
-
-    scrollToBottom();
-}
-
-// Initialize on DOM load
-document.addEventListener('DOMContentLoaded', () => {
-    marked.setOptions({ headerIds: false, mangle: false });
-    if (localStorage.getItem('jarvisTheme') === 'light') toggleTheme();
-    restoreChat();
-    // Initial render of any server-rendered message bubbles (if present)
-    document.querySelectorAll('.msg-content').forEach(el => {
-        const rawEl = el.querySelector('.raw-content');
-        if (rawEl) {
-            const raw = rawEl.innerHTML || rawEl.textContent;
-            el.innerHTML = renderMarkdown(raw);
-        }
-    });
-
-    scrollToBottom();
-});
+// Jarvis AI frontend. Conversations and preferences are intentionally local-only.
+let chatHistory = [], activeConversationId = null, isGenerating = false, activeController = null, shouldStickToBottom = true;
+const MAX_HISTORY_TURNS = 12, MAX_MESSAGE_CHARS = 8000, STORAGE_KEY = 'jarvisConversations', SETTINGS_KEY = 'jarvisSettings', legacyHistoryKey = 'jarvisChatHistory';
+const defaultSettings = { theme: 'dark', font: 'medium', density: 'comfortable', timestamps: false };
+function getSettings(){try{return {...defaultSettings,...JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}')}}catch(_){return {...defaultSettings}}}
+function saveSettings(s){localStorage.setItem(SETTINGS_KEY,JSON.stringify(s));applySettings(s)}
+function getConversations(){try{const x=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');return Array.isArray(x)?x:[]}catch(_){return []}}
+function saveConversations(x){localStorage.setItem(STORAGE_KEY,JSON.stringify(x));renderConversationList()}
+function makeConversation(messages=[]){return{id:crypto.randomUUID(),title:titleFor(messages),messages,createdAt:Date.now(),updatedAt:Date.now()}}
+function titleFor(messages){const m=messages.find(x=>x.role==='user');return m?m.content.replace(/\s+/g,' ').trim().slice(0,48):'New conversation'}
+function activeConversation(){return getConversations().find(x=>x.id===activeConversationId)}
+function syncActiveConversation(){const all=getConversations(),i=all.findIndex(x=>x.id===activeConversationId);if(i<0||!chatHistory.length)return;all[i].messages=chatHistory;all[i].title=titleFor(chatHistory);all[i].updatedAt=Date.now();saveConversations(all)}
+function safeMarkdown(text){return DOMPurify.sanitize(marked.parse(text||'',{breaks:true,gfm:true}),{USE_PROFILES:{html:true}})}
+function renderMarkdown(text){if(!text)return'';const el=document.createElement('div');el.innerHTML=safeMarkdown(text);el.querySelectorAll('pre code').forEach(x=>{try{hljs.highlightElement(x)}catch(_){}});addCopyButtons(el);return el.innerHTML}
+function addCopyButtons(container){container.querySelectorAll('pre').forEach(pre=>{if(pre.querySelector('.copy-btn'))return;const code=pre.querySelector('code'),lang=(code?.className.match(/language-([\w-]+)/)||[])[1],bar=document.createElement('div');bar.className='code-toolbar';if(lang){const label=document.createElement('span');label.className='code-language';label.textContent=lang;bar.appendChild(label)}const b=document.createElement('button');b.className='copy-btn';b.type='button';b.innerHTML='<i class="fa-regular fa-copy"></i> Copy';b.setAttribute('aria-label','Copy code');b.onclick=async()=>{try{await navigator.clipboard.writeText(code?code.innerText:pre.innerText);b.innerHTML='<i class="fa-solid fa-check"></i> Copied';setTimeout(()=>b.innerHTML='<i class="fa-regular fa-copy"></i> Copy',1600)}catch(_){b.textContent='Copy failed'}};bar.appendChild(b);pre.prepend(bar)})}
+function scrollToBottom(force=false){const c=document.getElementById('messagesContainer');if(c&&(force||shouldStickToBottom))c.scrollTop=c.scrollHeight}
+function checkScrollPosition(){const c=document.getElementById('messagesContainer');if(c)shouldStickToBottom=c.scrollHeight-c.scrollTop-c.clientHeight<100}
+function resizeComposer(){const x=document.getElementById('promptInput');if(x){x.style.height='auto';x.style.height=`${Math.min(x.scrollHeight,160)}px`}}
+function checkEnter(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('chatForm')?.requestSubmit()}}
+function sendStarterPrompt(text){const x=document.getElementById('promptInput');if(!x||isGenerating)return;x.value=text;resizeComposer();document.getElementById('chatForm')?.requestSubmit()}
+function closeSidebar(){document.getElementById('appWrapper')?.classList.remove('sidebar-visible')}
+function openSidebar(){document.getElementById('appWrapper')?.classList.add('sidebar-visible')}
+function openModal(id){const m=document.getElementById(id);if(m){m.hidden=false;m.querySelector('button,select,input')?.focus()}}
+function closeModals(){document.querySelectorAll('.modal-shell').forEach(x=>x.hidden=true)}
+function applySettings(s){document.body.classList.toggle('light-theme',s.theme==='light');document.body.dataset.font=s.font;document.body.dataset.density=s.density;const icon=document.querySelector('#themeToggle i');if(icon){icon.classList.toggle('fa-sun',s.theme!=='light');icon.classList.toggle('fa-moon',s.theme==='light')}const map={themeSetting:s.theme,fontSetting:s.font,densitySetting:s.density,timestampsSetting:s.timestamps};Object.entries(map).forEach(([id,v])=>{const e=document.getElementById(id);if(e)e[e.type==='checkbox'?'checked':'value']=v})}
+function toggleTheme(){const s=getSettings();s.theme=s.theme==='light'?'dark':'light';saveSettings(s)}
+function renderConversationList(){const list=document.getElementById('threadsItems'),empty=document.getElementById('threadsEmpty'),q=(document.getElementById('conversationSearch')?.value||'').toLowerCase();if(!list)return;list.innerHTML='';const items=getConversations().filter(c=>(c.title||'').toLowerCase().includes(q)).sort((a,b)=>b.updatedAt-a.updatedAt);document.getElementById('threadCount').textContent=items.length;empty.hidden=items.length>0;items.forEach(c=>{const item=document.createElement('div');item.className=`thread-item ${c.id===activeConversationId?'active':''}`;item.tabIndex=0;item.setAttribute('role','button');const t=document.createElement('span');t.className='thread-title';t.textContent=c.title||'New conversation';const actions=document.createElement('span');actions.className='thread-actions';const r=actionButton('Rename conversation','fa-pen',e=>{e.stopPropagation();renameConversation(c.id)}),d=actionButton('Delete conversation','fa-trash',e=>{e.stopPropagation();deleteConversation(c.id)});r.className='thread-action';d.className='thread-action danger';actions.append(r,d);item.append(t,actions);item.onclick=()=>selectConversation(c.id);item.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectConversation(c.id)}};list.appendChild(item)})}
+function selectConversation(id){if(isGenerating)return;activeConversationId=id;chatHistory=activeConversation()?.messages||getConversations().find(x=>x.id===id)?.messages||[];renderMessages();renderConversationList();closeSidebar()}
+function startNewChat(){if(isGenerating)stopGeneration();activeConversationId=null;chatHistory=[];renderMessages();renderConversationList();document.getElementById('promptInput')?.focus();closeSidebar()}
+function renameConversation(id){const all=getConversations(),c=all.find(x=>x.id===id);if(!c)return;const name=window.prompt('Conversation name',c.title);if(name?.trim()){c.title=name.trim().slice(0,80);c.updatedAt=Date.now();saveConversations(all)}}
+function deleteConversation(id){const c=getConversations().find(x=>x.id===id);if(!c||!window.confirm(`Delete “${c.title}”?`))return;localStorage.setItem(STORAGE_KEY,JSON.stringify(getConversations().filter(x=>x.id!==id)));if(id===activeConversationId)startNewChat();else renderConversationList()}
+function clearCurrentConversation(){if(!chatHistory.length)return;if(window.confirm('Clear this conversation?')){localStorage.setItem(STORAGE_KEY,JSON.stringify(getConversations().filter(x=>x.id!==activeConversationId)));startNewChat()}}
+function actionButton(label,icon,fn){const b=document.createElement('button');b.type='button';b.className='message-action';b.title=label;b.setAttribute('aria-label',label);b.innerHTML=`<i class="fa-solid ${icon}"></i>`;b.onclick=fn;return b}
+async function copyText(text){try{await navigator.clipboard.writeText(text)}catch(_){} }
+function messageElement(m,index){const w=document.createElement('div');w.className=`msg-wrapper ${m.role==='user'?'user':'ai'}`;w.dataset.index=index;const bubble=document.createElement('div');bubble.className='msg-bubble';const content=document.createElement('div');content.className='msg-content';content.innerHTML=renderMarkdown(m.content);bubble.appendChild(content);const footer=document.createElement('div');footer.className='message-footer';if(getSettings().timestamps&&m.time){const time=document.createElement('time');time.textContent=m.time;footer.appendChild(time)}const actions=document.createElement('div');actions.className='message-actions';if(m.role==='user')actions.appendChild(actionButton('Edit message','fa-pen',()=>editUserMessage(index)));else actions.append(actionButton('Copy response','fa-copy',()=>copyText(m.content)),actionButton('Regenerate response','fa-rotate-right',()=>regenerate(index)));footer.appendChild(actions);bubble.appendChild(footer);w.innerHTML=`<div class="avatar"><i class="fa-solid fa-${m.role==='user'?'user':'brain'}"></i></div>`;w.appendChild(bubble);return w}
+function emptyState(){const d=document.createElement('div');d.className='hero-state';d.innerHTML=`<div class="hero-icon"><i class="fa-solid fa-terminal"></i></div><p class="eyebrow">JARVIS // READY</p><h2 class="fw-bold mb-2">What are we building today?</h2><p class="text-secondary mb-4">Ask anything — coding, explanations, writing, logic, or math.</p><div class="row g-3"><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('Software Engineering Apps')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-bolt me-2"></i>Software Engineering</span><small>Explore ideas for a software project.</small></button></div><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('Write a Python script for web scraping with BeautifulSoup')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-code me-2"></i>Python Scraping</span><small>Build a BeautifulSoup and Requests script.</small></button></div><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('What are the top 5 best practices for Django security?')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-shield-halved me-2"></i>Django Security</span><small>Review practical application safeguards.</small></button></div><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('Draft a professional tech project proposal email')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-paper-plane me-2"></i>Project Proposal</span><small>Draft a polished proposal email.</small></button></div></div>`;return d}
+function renderMessages(){const c=document.getElementById('messagesContainer');if(!c)return;c.innerHTML='';if(!chatHistory.length){c.appendChild(emptyState());return}chatHistory.forEach((m,i)=>c.appendChild(messageElement(m,i)));scrollToBottom(true)}
+function ensureActiveConversation(){if(activeConversationId)return;const c=makeConversation();activeConversationId=c.id;localStorage.setItem(STORAGE_KEY,JSON.stringify([c,...getConversations()]))}
+function appendLiveMessage(role,text,time){const c=document.getElementById('messagesContainer');if(c.querySelector('.hero-state'))c.innerHTML='';const w=messageElement({role,content:text,time},chatHistory.length);c.appendChild(w);return w}
+function updateGeneratingState(on){isGenerating=on;document.getElementById('promptInput').disabled=on;document.getElementById('sendBtn').disabled=on;document.getElementById('stopBtn').hidden=!on;if(!on){document.getElementById('promptInput').focus();resizeComposer()}}
+function stopGeneration(){if(activeController)activeController.abort();updateGeneratingState(false);document.getElementById('aiTypingBubble')?.remove()}
+function editUserMessage(i){if(isGenerating||!chatHistory[i]||chatHistory[i].role!=='user')return;const input=document.getElementById('promptInput');input.value=chatHistory[i].content;chatHistory=chatHistory.slice(0,i);syncActiveConversation();renderMessages();resizeComposer();input.focus()}
+function regenerate(i){if(isGenerating||i<1||chatHistory[i].role!=='assistant')return;const prompt=chatHistory[i-1];if(!prompt||prompt.role!=='user')return;chatHistory=chatHistory.slice(0,i-1);renderMessages();sendPrompt(prompt.content)}
+async function handleSend(e){if(e)e.preventDefault();if(isGenerating)return;const input=document.getElementById('promptInput'),prompt=input?.value.trim();if(!prompt)return;if(prompt.length>MAX_MESSAGE_CHARS){window.alert(`Please keep messages under ${MAX_MESSAGE_CHARS} characters.`);return}input.value='';resizeComposer();sendPrompt(prompt)}
+async function sendPrompt(prompt){ensureActiveConversation();updateGeneratingState(true);const csrf=document.querySelector('[name=csrfmiddlewaretoken]')?.value||'',requestId=crypto.randomUUID();appendLiveMessage('user',prompt,new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));const ai=document.createElement('div');ai.className='msg-wrapper ai';ai.id='aiTypingBubble';ai.innerHTML='<div class="avatar"><i class="fa-solid fa-brain"></i></div><div class="msg-bubble"><div class="msg-content"><div class="typing-indicator" aria-label="Jarvis is generating"><span></span><span></span><span></span><em>Generating</em></div></div></div>';document.getElementById('messagesContainer').appendChild(ai);scrollToBottom(true);activeController=new AbortController();let accumulated='';try{const response=await fetch('/api/chat/',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({message:prompt,history:chatHistory,request_id:requestId,stream:true}),signal:activeController.signal});if(!response.ok)throw new Error(`Server returned ${response.status}`);const content=ai.querySelector('.msg-content'),type=response.headers.get('content-type')||'';if(type.includes('text/event-stream')){const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop()||'';for(const line of lines)if(line.startsWith('data: ')){const event=JSON.parse(line.slice(6));if(event.type==='chunk'){accumulated+=event.delta;content.innerHTML=renderMarkdown(accumulated);scrollToBottom()}else if(event.type==='error')throw new Error(event.error||'The AI service is unavailable.')}}}else{const data=await response.json();if(data.status!=='success')throw new Error(data.error||'Failed to generate response.');accumulated=data.ai_message.content;content.innerHTML=renderMarkdown(accumulated)}if(accumulated){const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});chatHistory.push({role:'user',content:prompt,time},{role:'assistant',content:accumulated,time});chatHistory=chatHistory.slice(-MAX_HISTORY_TURNS);syncActiveConversation()}ai.remove();renderMessages()}catch(err){if(err.name!=='AbortError')ai.querySelector('.msg-content').innerHTML=`<div class="error-state"><i class="fa-solid fa-triangle-exclamation"></i><span>${escapeHtml(err.message||'Network error connecting to Jarvis AI server.')}</span></div>`}finally{activeController=null;updateGeneratingState(false)}}
+function escapeHtml(text){return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function downloadChat(){const c=activeConversation(),blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),messages:c?.messages||chatHistory},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`jarvis-chat-${Date.now()}.json`;a.click();URL.revokeObjectURL(a.href)}
+function importChat(event){const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result),messages=Array.isArray(data)?data:data.messages;if(!Array.isArray(messages)||messages.length>MAX_HISTORY_TURNS||messages.some(m=>!['user','assistant'].includes(m.role)||typeof m.content!=='string'||!m.content.trim()))throw new Error();const c=makeConversation(messages.map(m=>({role:m.role,content:m.content.slice(0,MAX_MESSAGE_CHARS)})));localStorage.setItem(STORAGE_KEY,JSON.stringify([c,...getConversations()]));activeConversationId=c.id;chatHistory=c.messages;renderMessages();renderConversationList()}catch(_){window.alert('That file is not a valid Jarvis chat export.')}event.target.value=''};reader.readAsText(file)}
+document.addEventListener('DOMContentLoaded',()=>{marked.setOptions({headerIds:false,mangle:false});applySettings(getSettings());try{const old=JSON.parse(sessionStorage.getItem(legacyHistoryKey)||'[]');if(old.length&&!getConversations().length){const c=makeConversation(old);localStorage.setItem(STORAGE_KEY,JSON.stringify([c]))}}catch(_){}const list=getConversations();if(list.length){activeConversationId=list[0].id;chatHistory=list[0].messages||[]}renderMessages();renderConversationList();document.getElementById('messagesContainer')?.addEventListener('scroll',checkScrollPosition);document.getElementById('promptInput')?.addEventListener('input',resizeComposer);document.getElementById('conversationSearch')?.addEventListener('input',renderConversationList);document.getElementById('sidebarOpen')?.addEventListener('click',openSidebar);document.getElementById('sidebarClose')?.addEventListener('click',closeSidebar);document.getElementById('sidebarBackdrop')?.addEventListener('click',closeSidebar);document.getElementById('stopBtn')?.addEventListener('click',stopGeneration);document.getElementById('clearChatBtn')?.addEventListener('click',clearCurrentConversation);document.getElementById('settingsBtn')?.addEventListener('click',()=>openModal('settingsModal'));document.getElementById('shortcutsBtn')?.addEventListener('click',()=>openModal('shortcutsModal'));document.querySelectorAll('[data-close-modal]').forEach(b=>b.addEventListener('click',closeModals));document.querySelectorAll('.modal-shell').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModals()}));['themeSetting','fontSetting','densitySetting','timestampsSetting'].forEach(id=>document.getElementById(id)?.addEventListener('change',()=>{const s=getSettings();s.theme=document.getElementById('themeSetting').value;s.font=document.getElementById('fontSetting').value;s.density=document.getElementById('densitySetting').value;s.timestamps=document.getElementById('timestampsSetting').checked;saveSettings(s);renderMessages()}));document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();startNewChat()}if(e.key==='Escape'){closeModals();closeSidebar()}});resizeComposer()});

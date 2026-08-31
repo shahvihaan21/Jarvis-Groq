@@ -353,6 +353,10 @@ body {
     font-family: inherit;
 }
 
+.chat-textarea:focus-visible {
+    outline: none;
+}
+
 .chat-textarea::placeholder {
     color: #059669;
 }

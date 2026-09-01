@@ -17,9 +17,9 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          response=$(curl --fail -sS https://api.groq.com/openai/v1/chat/completions \
+          response=$(curl -sS -w '\n%{http_code}' https://api.groq.com/openai/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $GROQ_API_KEY" \
             -d '{
@@ -32,8 +32,21 @@ jobs:
               ],
               "max_tokens": 20
             }')
+          curl_status=$?
+          http_status="${response##*$'\n'}"
+          response_body="${response%$'\n'*}"
 
-          echo "$response" | grep -Fq "GROQ CONNECTION SUCCESS"
+          echo "Groq HTTP status: $http_status"
+          echo "Groq response body:"
+          printf '%s\n' "$response_body"
+
+          if [ "$curl_status" -ne 0 ]; then
+            exit "$curl_status"
+          fi
+          if [ "$http_status" -ge 400 ]; then
+            exit 1
+          fi
+          printf '%s' "$response_body" | grep -Fq "GROQ CONNECTION SUCCESS"
 
   analyze-repository:
     runs-on: ubuntu-latest

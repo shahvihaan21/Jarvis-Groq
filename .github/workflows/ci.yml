@@ -3,8 +3,11 @@ name: CI
 on:
   workflow_dispatch:
 
+env:
+  OPENROUTER_MODEL: openrouter/pareto-code
+
 jobs:
-  test-groq:
+  test-openrouter:
     runs-on: ubuntu-latest
 
     steps:
@@ -13,30 +16,42 @@ jobs:
         with:
           ref: main
 
-      - name: Test Groq API
+      - name: Test OpenRouter API
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
 
-          curl -v -X POST \
-            "https://api.groq.com/openai/v1/chat/completions" \
+          response=$(curl -sS -w '\n%{http_code}' \
+            -X POST \
+            "https://openrouter.ai/api/v1/chat/completions" \
+            -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${GROQ_API_KEY}" \
             --data-raw '{
-              "model": "openai/gpt-oss-20b",
+              "model": "'"${OPENROUTER_MODEL}"'",
               "messages": [
                 {
                   "role": "user",
-                  "content": "Reply with exactly: GROQ CONNECTION SUCCESS"
+                  "content": "Reply with exactly: OPENROUTER CONNECTION SUCCESS"
                 }
               ],
-              "max_completion_tokens": 20
-            }'
+              "max_tokens": 20
+            }')
+
+          http_status="${response##*$'\n'}"
+          response_body="${response%$'\n'*}"
+
+          echo "OpenRouter HTTP status: $http_status"
+          echo "OpenRouter response:"
+          printf '%s\n' "$response_body"
+
+          if [ "$http_status" -ge 400 ]; then
+            exit 1
+          fi
 
   analyze-repository:
     runs-on: ubuntu-latest
-    needs: test-groq
+    needs: test-openrouter
 
     steps:
       - name: Checkout main
@@ -51,6 +66,6 @@ jobs:
 
       - name: Run read-only improvement agent
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python scripts/daily_agent.py

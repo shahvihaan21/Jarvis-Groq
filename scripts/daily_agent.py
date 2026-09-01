@@ -1,4 +1,4 @@
-"""Read-only repository analysis agent for Jarvis-Groq."""
+"""Read-only repository analysis agent for Jarvis."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ RULES_PATHS = (ROOT / ".github" / "codex" / "daily-improvement.md",)
 MAX_FILE_BYTES = 48 * 1024
 MAX_CONTEXT_BYTES = 180 * 1024
 REQUEST_TIMEOUT_SECONDS = 60
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 TEXT_SUFFIXES = {
     ".css",
@@ -90,9 +89,9 @@ def is_relevant_text_file(path: Path) -> bool:
 def redact_sensitive_content(content: str) -> str:
     """Redact recognizable credentials before content can enter the prompt."""
 
-    content = re.sub(r"gsk_[A-Za-z0-9_-]+", "[REDACTED_GROQ_KEY]", content)
+    content = re.sub(r"sk-or-v1-[A-Za-z0-9_-]+", "[REDACTED_API_KEY]", content)
     return re.sub(
-        r"(?im)(GROQ_API_KEY|SECRET_KEY)\s*([:=])\s*([\"']?)[^\s\"']+\3",
+        r"(?im)(OPENROUTER_API_KEY|SECRET_KEY)\s*([:=])\s*([\"']?)[^\s\"']+\3",
         r"\1\2 [REDACTED]",
         content,
     )
@@ -139,7 +138,7 @@ def build_prompts() -> tuple[str, str]:
     rules, rules_name = load_rules()
     tree = repository_tree()
     file_contents = read_relevant_files(tree)
-    system_prompt = """You are a careful, read-only maintenance reviewer for Jarvis-Groq.
+    system_prompt = """You are a careful, read-only maintenance reviewer for Jarvis.
 Follow the repository rules supplied by the user. Identify EXACTLY ONE small,
 worthwhile, low-risk improvement, or explicitly report that no worthwhile
 improvement exists. Do not propose code, patches, diffs, shell commands, or
@@ -165,14 +164,17 @@ Agent rules loaded from {rules_name}:
     return system_prompt, user_prompt
 
 
-def ask_groq(system_prompt: str, user_prompt: str) -> str:
-    api_key = os.environ.get("GROQ_API_KEY")
+def ask_openrouter(system_prompt: str, user_prompt: str) -> str:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set in the environment")
+        raise RuntimeError("OPENROUTER_API_KEY is not set in the environment")
+    model = os.environ.get("OPENROUTER_MODEL")
+    if not model:
+        raise RuntimeError("OPENROUTER_MODEL is not set in the environment")
 
     request_body = json.dumps(
         {
-            "model": os.environ.get("GROQ_MODEL", DEFAULT_MODEL),
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -182,7 +184,7 @@ def ask_groq(system_prompt: str, user_prompt: str) -> str:
         }
     ).encode("utf-8")
     request = Request(
-        "https://api.groq.com/openai/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
         data=request_body,
         headers={
             "Content-Type": "application/json",
@@ -195,25 +197,25 @@ def ask_groq(system_prompt: str, user_prompt: str) -> str:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             result = json.load(response)
     except HTTPError as error:
-        raise RuntimeError(f"Groq API request failed with HTTP status {error.code}") from error
+        raise RuntimeError(f"OpenRouter API request failed with HTTP status {error.code}") from error
     except (URLError, TimeoutError, OSError) as error:
-        raise RuntimeError("Groq API request could not be completed") from error
+        raise RuntimeError("OpenRouter API request could not be completed") from error
     except json.JSONDecodeError as error:
-        raise RuntimeError("Groq API returned invalid JSON") from error
+        raise RuntimeError("OpenRouter API returned invalid JSON") from error
 
     try:
         proposal = result["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("Groq API returned an unexpected response") from error
+        raise RuntimeError("OpenRouter API returned an unexpected response") from error
     if not isinstance(proposal, str) or not proposal.strip():
-        raise RuntimeError("Groq API returned an empty proposal")
+        raise RuntimeError("OpenRouter API returned an empty proposal")
     return proposal.strip()
 
 
 def main() -> int:
     try:
         system_prompt, user_prompt = build_prompts()
-        proposal = ask_groq(system_prompt, user_prompt)
+        proposal = ask_openrouter(system_prompt, user_prompt)
     except RuntimeError as error:
         print(f"Daily agent failed: {error}", file=sys.stderr)
         return 1

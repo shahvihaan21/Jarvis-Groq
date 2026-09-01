@@ -147,7 +147,9 @@ Select EXACTLY ONE small, worthwhile, low-risk improvement, or report that no
 worthwhile improvement exists. Do not modify workflows, deployment files,
 credentials, secrets, or unrelated files. Do not propose shell commands.
 
-Return only valid JSON with this shape:
+Return ONLY ONE valid JSON object with exactly these fields. Do not use Markdown
+fences. Do not include explanation, commentary, or any text before or after the
+JSON object:
 {
   "no_improvement": false,
   "improvement": "short description",
@@ -164,6 +166,8 @@ improvement and must not include workflow, deployment, secret, or credential
 changes.
 """
     user_prompt = f"""Review this bounded repository summary and implement one improvement through a unified diff.
+Your entire response must be exactly one valid JSON object matching the schema
+in the system instructions: no Markdown fences, explanation, or surrounding text.
 
 Repository file tree (sensitive and excluded paths omitted):
 {chr(10).join(tree)}
@@ -229,12 +233,15 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
             f"OpenRouter response body was not valid JSON (line {error.lineno}, column {error.colno})"
         ) from error
 
-    try:
-        choices = result["choices"]
-        message = choices[0]["message"]
-        content = message["content"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("OpenRouter response had no valid assistant message content") from error
+    if not isinstance(result, dict):
+        raise RuntimeError("OpenRouter response envelope was not a JSON object")
+    choices = result.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise RuntimeError("OpenRouter response had no valid choices")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise RuntimeError("OpenRouter response had no valid assistant message")
+    content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         raise RuntimeError("OpenRouter assistant message content was empty or not text")
     return parse_proposal(content)
@@ -249,7 +256,10 @@ def api_error_summary(response_body: bytes) -> str:
         if isinstance(error, dict):
             message = error.get("message") or error.get("type") or error.get("code")
             if isinstance(message, str) and message.strip():
-                return redact_sensitive_content(message.strip())[:240]
+                detail = redact_sensitive_content(message.strip())[:240]
+                if any(marker in detail.lower() for marker in ("response_format", "json_object", "structured output")):
+                    return f"structured JSON output was rejected: {detail}"
+                return detail
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
         pass
     return "no safe error detail returned"
@@ -265,13 +275,35 @@ def parse_proposal(content: str) -> dict[str, object]:
         ) from error
     if not isinstance(proposal, dict):
         raise RuntimeError("OpenRouter assistant content was not a JSON object")
-    if not isinstance(proposal.get("no_improvement"), bool):
+    required_fields = {
+        "no_improvement",
+        "improvement",
+        "why",
+        "files",
+        "implementation",
+        "tests",
+        "patch",
+    }
+    missing_fields = sorted(required_fields - proposal.keys())
+    if missing_fields:
+        raise RuntimeError("OpenRouter proposal is missing required fields")
+    if set(proposal) != required_fields:
+        raise RuntimeError("OpenRouter proposal contains unexpected fields")
+    if not isinstance(proposal["no_improvement"], bool):
         raise RuntimeError("OpenRouter proposal has an invalid no_improvement field")
+    for field in ("improvement", "why", "implementation", "patch"):
+        if not isinstance(proposal[field], str):
+            raise RuntimeError(f"OpenRouter proposal has an invalid {field} field")
+    for field in ("files", "tests"):
+        if not isinstance(proposal[field], list) or not all(isinstance(item, str) for item in proposal[field]):
+            raise RuntimeError(f"OpenRouter proposal has an invalid {field} field")
     if proposal["no_improvement"] is False:
-        if not isinstance(proposal.get("improvement"), str) or not proposal["improvement"].strip():
+        if not proposal["improvement"].strip():
             raise RuntimeError("OpenRouter proposal is missing an improvement description")
-        if not isinstance(proposal.get("patch"), str) or not proposal["patch"].strip():
+        if not proposal["patch"].strip():
             raise RuntimeError("OpenRouter proposal is missing a patch")
+    elif proposal["patch"].strip():
+        raise RuntimeError("OpenRouter no-improvement proposal unexpectedly included a patch")
     return proposal
 
 

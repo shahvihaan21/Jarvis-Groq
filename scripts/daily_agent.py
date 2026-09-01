@@ -197,7 +197,7 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
-        "max_tokens": 4096,
+        "max_tokens": 1000,
     }
 
     def send_api_request(payload: dict[str, object]) -> bytes:
@@ -219,18 +219,21 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
     except HTTPError as error:
         err_bytes = error.read()
         summary = api_error_summary(err_bytes)
+
+        if error.code == 402 or "can only afford" in summary.lower() or "max_tokens" in summary.lower():
+            match = re.search(r"can only afford (\d+)", summary)
+            affordable = int(match.group(1)) if match else 800
+            payload_dict["max_tokens"] = min(affordable, 1000)
+
         if "response_format" in payload_dict:
             payload_dict.pop("response_format", None)
-            try:
-                response_body = send_api_request(payload_dict)
-            except Exception:
-                raise RuntimeError(
-                    f"OpenRouter API returned HTTP {error.code}: {summary}"
-                ) from error
-        else:
+
+        try:
+            response_body = send_api_request(payload_dict)
+        except Exception as retry_error:
             raise RuntimeError(
                 f"OpenRouter API returned HTTP {error.code}: {summary}"
-            ) from error
+            ) from retry_error
     except (URLError, TimeoutError, OSError) as error:
         raise RuntimeError("OpenRouter API request could not be completed") from error
 

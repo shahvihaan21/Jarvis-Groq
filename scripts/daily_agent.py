@@ -189,43 +189,51 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
     if not model:
         raise RuntimeError("OPENROUTER_MODEL is not set in the environment")
 
-    request_body = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2,
-            "max_tokens": 4096,
-        }
-    ).encode("utf-8")
-    request = Request(
-        "https://openrouter.ai/api/v1/chat/completions",
-        data=request_body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
-    try:
+    payload_dict: dict[str, object] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.2,
+        "max_tokens": 4096,
+    }
+
+    def send_api_request(payload: dict[str, object]) -> bytes:
+        request_body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=request_body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            http_status = response.getcode()
-            response_body = response.read()
+            return response.read()
+
+    try:
+        response_body = send_api_request(payload_dict)
     except HTTPError as error:
-        response_body = error.read()
-        raise RuntimeError(
-            f"OpenRouter API returned HTTP {error.code}: {api_error_summary(response_body)}"
-        ) from error
+        err_bytes = error.read()
+        summary = api_error_summary(err_bytes)
+        if "response_format" in payload_dict:
+            payload_dict.pop("response_format", None)
+            try:
+                response_body = send_api_request(payload_dict)
+            except Exception:
+                raise RuntimeError(
+                    f"OpenRouter API returned HTTP {error.code}: {summary}"
+                ) from error
+        else:
+            raise RuntimeError(
+                f"OpenRouter API returned HTTP {error.code}: {summary}"
+            ) from error
     except (URLError, TimeoutError, OSError) as error:
         raise RuntimeError("OpenRouter API request could not be completed") from error
 
-    if not 200 <= http_status < 300:
-        raise RuntimeError(
-            f"OpenRouter API returned HTTP {http_status}: {api_error_summary(response_body)}"
-        )
     try:
         result = json.loads(response_body)
     except json.JSONDecodeError as error:

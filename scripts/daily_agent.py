@@ -181,62 +181,7 @@ Canonical agent rules:
     return system_prompt, user_prompt
 
 
-def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set in the environment")
-    model = os.environ.get("OPENROUTER_MODEL")
-    if not model:
-        raise RuntimeError("OPENROUTER_MODEL is not set in the environment")
-
-    payload_dict: dict[str, object] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.2,
-        "max_tokens": 1000,
-    }
-
-    def send_api_request(payload: dict[str, object]) -> bytes:
-        request_body = json.dumps(payload).encode("utf-8")
-        request = Request(
-            "https://openrouter.ai/api/v1/chat/completions",
-            data=request_body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
-        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            return response.read()
-
-    try:
-        response_body = send_api_request(payload_dict)
-    except HTTPError as error:
-        err_bytes = error.read()
-        summary = api_error_summary(err_bytes)
-
-        if error.code == 402 or "can only afford" in summary.lower() or "max_tokens" in summary.lower():
-            match = re.search(r"can only afford (\d+)", summary)
-            affordable = int(match.group(1)) if match else 800
-            payload_dict["max_tokens"] = min(affordable, 1000)
-
-        if "response_format" in payload_dict:
-            payload_dict.pop("response_format", None)
-
-        try:
-            response_body = send_api_request(payload_dict)
-        except Exception as retry_error:
-            raise RuntimeError(
-                f"OpenRouter API returned HTTP {error.code}: {summary}"
-            ) from retry_error
-    except (URLError, TimeoutError, OSError) as error:
-        raise RuntimeError("OpenRouter API request could not be completed") from error
-
+def parse_response_content(response_body: bytes) -> dict[str, object]:
     try:
         result = json.loads(response_body)
     except json.JSONDecodeError as error:
@@ -256,6 +201,72 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
     if not isinstance(content, str) or not content.strip():
         raise RuntimeError("OpenRouter assistant message content was empty or not text")
     return parse_proposal(content)
+
+
+def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set in the environment")
+    configured_model = os.environ.get("OPENROUTER_MODEL", "openrouter/pareto-code")
+
+    candidate_models = [configured_model]
+    for fallback in ("openrouter/free", "cohere/north-mini-code:free", "google/gemma-4-31b-it:free"):
+        if fallback not in candidate_models:
+            candidate_models.append(fallback)
+
+    last_error: Exception | None = None
+    for model in candidate_models:
+        payload_dict: dict[str, object] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+            "max_tokens": 1000,
+        }
+
+        def send_api_request(payload: dict[str, object]) -> bytes:
+            request_body = json.dumps(payload).encode("utf-8")
+            request = Request(
+                "https://openrouter.ai/api/v1/chat/completions",
+                data=request_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+                method="POST",
+            )
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                return response.read()
+
+        try:
+            response_body = send_api_request(payload_dict)
+            return parse_response_content(response_body)
+        except HTTPError as error:
+            err_bytes = error.read()
+            summary = api_error_summary(err_bytes)
+
+            if error.code == 402 or "can only afford" in summary.lower() or "max_tokens" in summary.lower():
+                match = re.search(r"can only afford (\d+)", summary)
+                affordable = int(match.group(1)) if match else 800
+                payload_dict["max_tokens"] = min(affordable, 1000)
+
+            if "response_format" in payload_dict:
+                payload_dict.pop("response_format", None)
+
+            try:
+                response_body = send_api_request(payload_dict)
+                return parse_response_content(response_body)
+            except Exception as retry_err:
+                last_error = RuntimeError(f"Model {model} failed: {summary}")
+                continue
+        except (URLError, TimeoutError, OSError) as error:
+            last_error = error
+            continue
+
+    raise RuntimeError(f"All candidate OpenRouter models failed. Last error: {last_error}")
 
 
 def api_error_summary(response_body: bytes) -> str:

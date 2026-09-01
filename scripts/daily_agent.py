@@ -393,6 +393,17 @@ def final_diff_is_safe() -> None:
         raise RuntimeError("the staged diff appears to contain a credential")
 
 
+def inspect_staged_changes() -> None:
+    """Print the final status and diff summary before the commit decision."""
+
+    print("Final git status:")
+    print(run_command(["git", "status", "--short"]).rstrip())
+    print("Final staged diff check:")
+    run_command(["git", "diff", "--cached", "--check"])
+    print("Final staged diff:")
+    print(run_command(["git", "diff", "--cached", "--no-ext-diff", "--"]).rstrip())
+
+
 def rollback(paths: list[str]) -> None:
     """Restore only this run's bounded changes after a failed validation."""
 
@@ -463,6 +474,7 @@ def main() -> int:
         run_command(["git", "add", "--", *paths])
         staged_change_limits(paths)
         final_diff_is_safe()
+        inspect_staged_changes()
         run_validation(paths)
         commit_and_push(improvement, paths)
     except RuntimeError as error:

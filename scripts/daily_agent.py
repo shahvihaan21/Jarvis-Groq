@@ -351,7 +351,8 @@ def run_command(arguments: list[str], *, input_text: str | None = None) -> str:
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RuntimeError(f"command failed to complete: {arguments[0]}") from error
     if result.returncode != 0:
-        raise RuntimeError(f"command failed with exit status {result.returncode}: {arguments[0]}")
+        stderr_msg = result.stderr.strip()[:300]
+        raise RuntimeError(f"command failed with exit status {result.returncode}: {' '.join(arguments)} ({stderr_msg})")
     return result.stdout
 
 
@@ -494,8 +495,23 @@ def main() -> int:
         patch = proposal.get("patch")
         if not improvement or not isinstance(patch, str) or not patch.strip():
             raise RuntimeError("proposal did not contain one improvement and a patch")
-        run_command(["git", "apply", "--check", "--whitespace=nowarn", "-"], input_text=patch)
-        run_command(["git", "apply", "--whitespace=nowarn", "-"], input_text=patch)
+        patch_applied = False
+        for apply_args in [
+            ["git", "apply", "--check", "-p1", "--whitespace=nowarn", "-"],
+            ["git", "apply", "--check", "-p0", "--whitespace=nowarn", "-"],
+            ["git", "apply", "--check", "--whitespace=nowarn", "-"],
+        ]:
+            try:
+                run_command(apply_args, input_text=patch)
+                actual_args = [arg for arg in apply_args if arg != "--check"]
+                run_command(actual_args, input_text=patch)
+                patch_applied = True
+                break
+            except Exception:
+                continue
+
+        if not patch_applied:
+            raise RuntimeError("git apply failed to apply the proposed patch")
         paths = changed_paths()
         validate_changed_paths(paths)
         run_command(["git", "add", "--", *paths])

@@ -3,6 +3,9 @@ name: CI
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   OPENROUTER_MODEL: openrouter/pareto-code
 
@@ -64,8 +67,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run read-only improvement agent
+      - name: Install existing project dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run autonomous improvement agent
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           python scripts/daily_agent.py
+
+      - name: Inspect agent result
+        run: |
+          git status --short
+          git diff --check
+          git diff --stat

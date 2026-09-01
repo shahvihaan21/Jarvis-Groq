@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent.parent
 RULES_PATH = ROOT / ".github" / "codex" / "daily-improvement.md"
 MAX_FILE_BYTES = 48 * 1024
-MAX_CONTEXT_BYTES = 180 * 1024
+MAX_CONTEXT_BYTES = 24 * 1024
 MAX_CHANGED_FILES = 5
 MAX_CHANGED_LINES = 200
 REQUEST_TIMEOUT_SECONDS = 120

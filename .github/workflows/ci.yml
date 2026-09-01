@@ -19,11 +19,11 @@ jobs:
         run: |
           set -uo pipefail
 
-          response=$(curl -sS -w '\n%{http_code}' https://api.groq.com/openai/v1/chat/completions \
+          response=$(curl -sS -X POST -w '\n%{http_code}' https://api.groq.com/openai/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $GROQ_API_KEY" \
             -d '{
-              "model": "llama-3.3-70b-versatile",
+              "model": "openai/gpt-oss-20b",
               "messages": [
                 {
                   "role": "user",

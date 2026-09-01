@@ -1,18 +1,36 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
 
 jobs:
-  test:
+  test-groq:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout main
+        uses: actions/checkout@v5
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - run: python scripts/validate_env.py
+          ref: main
+
+      - name: Test Groq API
         env:
-          GROQ_API_KEY: ci-placeholder
-          SECRET_KEY: ci-placeholder
-      - run: pytest
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          response=$(curl --fail -sS https://api.groq.com/openai/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $GROQ_API_KEY" \
+            -d '{
+              "model": "llama-3.3-70b-versatile",
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "Reply with exactly: GROQ CONNECTION SUCCESS"
+                }
+              ],
+              "max_tokens": 20
+            }')
+
+          echo "$response" | grep -Fq "GROQ CONNECTION SUCCESS"

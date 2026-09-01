@@ -262,7 +262,7 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
             except Exception as retry_err:
                 last_error = RuntimeError(f"Model {model} failed: {summary}")
                 continue
-        except (URLError, TimeoutError, OSError) as error:
+        except (URLError, TimeoutError, OSError, RuntimeError, ValueError) as error:
             last_error = error
             continue
 
@@ -289,27 +289,15 @@ def api_error_summary(response_body: bytes) -> str:
 
 def parse_proposal(content: str) -> dict[str, object]:
     content = content.strip()
-    if content.startswith("```"):
-        lines = content.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        content = "\n".join(lines).strip()
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+    json_str = match.group(0) if match else content
+
     try:
-        proposal = json.loads(content)
-    except json.JSONDecodeError:
-        start_idx = content.find("{")
-        end_idx = content.rfind("}")
-        if start_idx != -1 and end_idx > start_idx:
-            try:
-                proposal = json.loads(content[start_idx : end_idx + 1])
-            except json.JSONDecodeError as error:
-                raise RuntimeError(
-                    f"OpenRouter assistant content was not valid JSON (line {error.lineno}, column {error.colno})"
-                ) from error
-        else:
-            raise RuntimeError("OpenRouter assistant content was not valid JSON")
+        proposal = json.loads(json_str)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"OpenRouter assistant content was not valid JSON (line {error.lineno}, column {error.colno})"
+        ) from error
 
     if not isinstance(proposal, dict):
         raise RuntimeError("OpenRouter assistant content was not a JSON object")

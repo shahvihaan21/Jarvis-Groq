@@ -192,6 +192,7 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            "response_format": {"type": "json_object"},
             "temperature": 0.2,
             "max_tokens": 1200,
         }
@@ -207,33 +208,70 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
     )
     try:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            result = json.load(response)
+            http_status = response.getcode()
+            response_body = response.read()
     except HTTPError as error:
-        raise RuntimeError(f"OpenRouter API request failed with HTTP status {error.code}") from error
+        response_body = error.read()
+        raise RuntimeError(
+            f"OpenRouter API returned HTTP {error.code}: {api_error_summary(response_body)}"
+        ) from error
     except (URLError, TimeoutError, OSError) as error:
         raise RuntimeError("OpenRouter API request could not be completed") from error
+
+    if not 200 <= http_status < 300:
+        raise RuntimeError(
+            f"OpenRouter API returned HTTP {http_status}: {api_error_summary(response_body)}"
+        )
+    try:
+        result = json.loads(response_body)
     except json.JSONDecodeError as error:
-        raise RuntimeError("OpenRouter API returned invalid JSON") from error
+        raise RuntimeError(
+            f"OpenRouter response body was not valid JSON (line {error.lineno}, column {error.colno})"
+        ) from error
 
     try:
-        content = result["choices"][0]["message"]["content"]
+        choices = result["choices"]
+        message = choices[0]["message"]
+        content = message["content"]
     except (KeyError, IndexError, TypeError) as error:
-        raise RuntimeError("OpenRouter API returned an unexpected response") from error
+        raise RuntimeError("OpenRouter response had no valid assistant message content") from error
     if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("OpenRouter API returned an empty proposal")
+        raise RuntimeError("OpenRouter assistant message content was empty or not text")
     return parse_proposal(content)
+
+
+def api_error_summary(response_body: bytes) -> str:
+    """Return a short, credential-safe summary of an API error response."""
+
+    try:
+        payload = json.loads(response_body)
+        error = payload.get("error", {}) if isinstance(payload, dict) else {}
+        if isinstance(error, dict):
+            message = error.get("message") or error.get("type") or error.get("code")
+            if isinstance(message, str) and message.strip():
+                return redact_sensitive_content(message.strip())[:240]
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        pass
+    return "no safe error detail returned"
 
 
 def parse_proposal(content: str) -> dict[str, object]:
     content = content.strip()
-    if content.startswith("```") and content.endswith("```"):
-        content = content.split("\n", 1)[1].rsplit("\n", 1)[0]
     try:
         proposal = json.loads(content)
     except json.JSONDecodeError as error:
-        raise RuntimeError("OpenRouter returned a non-JSON improvement proposal") from error
+        raise RuntimeError(
+            f"OpenRouter assistant content was not valid JSON (line {error.lineno}, column {error.colno})"
+        ) from error
     if not isinstance(proposal, dict):
-        raise RuntimeError("OpenRouter proposal was not a JSON object")
+        raise RuntimeError("OpenRouter assistant content was not a JSON object")
+    if not isinstance(proposal.get("no_improvement"), bool):
+        raise RuntimeError("OpenRouter proposal has an invalid no_improvement field")
+    if proposal["no_improvement"] is False:
+        if not isinstance(proposal.get("improvement"), str) or not proposal["improvement"].strip():
+            raise RuntimeError("OpenRouter proposal is missing an improvement description")
+        if not isinstance(proposal.get("patch"), str) or not proposal["patch"].strip():
+            raise RuntimeError("OpenRouter proposal is missing a patch")
     return proposal
 
 

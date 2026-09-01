@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  schedule:
+    - cron: "30 11 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,17 +17,18 @@ jobs:
 
     steps:
       - name: Checkout main
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
 
       - name: Ensure local main branch
         run: |
           set -euo pipefail
-          git switch -c main --track origin/main
+          git checkout -B main origin/main
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -41,3 +44,4 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python scripts/daily_agent.py
+

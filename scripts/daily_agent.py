@@ -23,7 +23,7 @@ MAX_FILE_BYTES = 48 * 1024
 MAX_CONTEXT_BYTES = 180 * 1024
 MAX_CHANGED_FILES = 5
 MAX_CHANGED_LINES = 200
-REQUEST_TIMEOUT_SECONDS = 60
+REQUEST_TIMEOUT_SECONDS = 120
 COMMAND_TIMEOUT_SECONDS = 300
 TEXT_SUFFIXES = {
     ".css",
@@ -54,7 +54,7 @@ EXCLUDED_DIRECTORY_NAMES = {
     "secrets",
     "venv",
 }
-PROTECTED_FILE_NAMES = {"vercel.json", "Procfile", "runtime.txt"}
+PROTECTED_FILE_NAMES = {"vercel.json", "Procfile", "runtime.txt", "daily_agent.py"}
 
 
 def is_sensitive_or_unnecessary(path: Path) -> bool:
@@ -198,7 +198,7 @@ def request_proposal(system_prompt: str, user_prompt: str) -> dict[str, object]:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.2,
-            "max_tokens": 1200,
+            "max_tokens": 4096,
         }
     ).encode("utf-8")
     request = Request(
@@ -267,12 +267,28 @@ def api_error_summary(response_body: bytes) -> str:
 
 def parse_proposal(content: str) -> dict[str, object]:
     content = content.strip()
+    if content.startswith("```"):
+        lines = content.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines).strip()
     try:
         proposal = json.loads(content)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(
-            f"OpenRouter assistant content was not valid JSON (line {error.lineno}, column {error.colno})"
-        ) from error
+    except json.JSONDecodeError:
+        start_idx = content.find("{")
+        end_idx = content.rfind("}")
+        if start_idx != -1 and end_idx > start_idx:
+            try:
+                proposal = json.loads(content[start_idx : end_idx + 1])
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    f"OpenRouter assistant content was not valid JSON (line {error.lineno}, column {error.colno})"
+                ) from error
+        else:
+            raise RuntimeError("OpenRouter assistant content was not valid JSON")
+
     if not isinstance(proposal, dict):
         raise RuntimeError("OpenRouter assistant content was not a JSON object")
     required_fields = {
@@ -286,9 +302,7 @@ def parse_proposal(content: str) -> dict[str, object]:
     }
     missing_fields = sorted(required_fields - proposal.keys())
     if missing_fields:
-        raise RuntimeError("OpenRouter proposal is missing required fields")
-    if set(proposal) != required_fields:
-        raise RuntimeError("OpenRouter proposal contains unexpected fields")
+        raise RuntimeError(f"OpenRouter proposal is missing required fields: {', '.join(missing_fields)}")
     if not isinstance(proposal["no_improvement"], bool):
         raise RuntimeError("OpenRouter proposal has an invalid no_improvement field")
     for field in ("improvement", "why", "implementation", "patch"):
@@ -352,6 +366,8 @@ def protected_change(path_name: str) -> bool:
         return True
     if lowered == ".github" or lowered.startswith(".github/"):
         return True
+    if lowered == "scripts/daily_agent.py" or path.name == "daily_agent.py":
+        return True
     return is_sensitive_or_unnecessary(ROOT / path_name)
 
 
@@ -374,7 +390,7 @@ def staged_change_limits(paths: list[str]) -> None:
     staged_paths: list[str] = []
     for line in output:
         additions, deletions, path_name = line.split("\t", 2)
-        staged_paths.append(path_name)
+        staged_paths.append(path_name.replace("\\", "/"))
         if additions != "-" and deletions != "-":
             changed_lines += int(additions) + int(deletions)
     if sorted(set(staged_paths)) != sorted(set(paths)):
@@ -467,8 +483,8 @@ def main() -> int:
         patch = proposal.get("patch")
         if not improvement or not isinstance(patch, str) or not patch.strip():
             raise RuntimeError("proposal did not contain one improvement and a patch")
-        run_command(["git", "apply", "--check", "--whitespace=error", "-"], input_text=patch)
-        run_command(["git", "apply", "--whitespace=error", "-"], input_text=patch)
+        run_command(["git", "apply", "--check", "--whitespace=nowarn", "-"], input_text=patch)
+        run_command(["git", "apply", "--whitespace=nowarn", "-"], input_text=patch)
         paths = changed_paths()
         validate_changed_paths(paths)
         run_command(["git", "add", "--", *paths])

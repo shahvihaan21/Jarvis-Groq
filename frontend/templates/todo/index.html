@@ -14,7 +14,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v={{ frontend_version }}">
 </head>
 
 <body>
@@ -69,7 +69,7 @@
                     <button type="button" class="icon-btn" id="clearChatBtn" aria-label="Clear current conversation" title="Clear current conversation"><i class="fa-solid fa-broom"></i></button>
                     <button type="button" class="icon-btn" id="settingsBtn" aria-label="Open settings" title="Settings"><i class="fa-solid fa-sliders"></i></button>
                     <span class="status-dot d-inline-block rounded-circle bg-success"></span>
-                    <span class="online-label">Ripple Bot Online </span>
+                    <span class="online-label">AI Online </span>
                 </div>
             </header>
 
@@ -85,19 +85,19 @@
                     <!-- Prompt Starter Suggestions -->
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <button type="button" class="prompt-card" onclick="sendStarterPrompt('Software Engineering Apps')">
+                            <button type="button" class="prompt-card" onclick="sendStarterPrompt('Tell Me about Yourself')">
                                 <div class="fw-semibold text-success mb-1"><i class="fa-solid fa-bolt me-2"></i>Software
-                                    Engineering</div>
-                                <small class="text-secondary">Software Engineering Apps.</small>
+                                    Yourself</div>
+                                <small class="text-secondary">Tell Me about Yourself.</small>
                             </button>
                         </div>
                         <div class="col-md-6">
                             <button type="button" class="prompt-card"
-                                onclick="sendStarterPrompt('Write a Python script for web scraping with BeautifulSoup')">
+                                onclick="sendStarterPrompt('Write a Python script for web scraping with Capabilities')">
                                 <div class="fw-semibold text-success mb-1"><i class="fa-solid fa-code me-2"></i>Python
                                     Scraping</div>
-                                <small class="text-secondary">Write a Python script using BeautifulSoup and
-                                    Requests.</small>
+                                <small class="text-secondary">Write Down your Strengths and
+                                   Capabilities.</small>
                             </button>
                         </div>
                         <div class="col-md-6">
@@ -160,7 +160,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <!-- Custom Modular Frontend Script -->
-    <script src="{% static 'js/chat.js' %}"></script>
+    <script src="{% static 'js/chat.js' %}?v={{ frontend_version }}"></script>
 </body>
 
 </html>

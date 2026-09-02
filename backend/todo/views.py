@@ -6,6 +6,7 @@ conversation history (JS array) and sends it with every request. Inference
 is streamed from the Groq API via SSE. Nothing is stored server-side.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -32,6 +33,18 @@ MAX_REQUEST_BYTES = 256 * 1024
 _client = None
 
 
+def frontend_asset_version() -> str:
+    """Return a content version so browsers fetch changed static assets."""
+    static_dir = settings.BASE_DIR.parent / "frontend" / "static"
+    digest = hashlib.sha256()
+    for relative_path in ("css/style.css", "js/chat.js"):
+        try:
+            digest.update((static_dir / relative_path).read_bytes())
+        except OSError:
+            digest.update(relative_path.encode())
+    return digest.hexdigest()[:16]
+
+
 def get_groq_client() -> Groq:
     """Lazily create and reuse a single Groq client per worker process."""
     global _client
@@ -48,7 +61,10 @@ def get_groq_client() -> Groq:
 
 def index(request):
     active_model = os.getenv("GROQ_MODEL", GROQ_MODEL)
-    response = render(request, "todo/index.html", {"model_name": active_model})
+    response = render(request, "todo/index.html", {
+        "model_name": active_model,
+        "frontend_version": frontend_asset_version(),
+    })
     # The HTML shell references mutable CSS/JS files. Revalidate it on every
     # request so frontend updates are not hidden behind a one-hour cache.
     response["Cache-Control"] = "no-cache, must-revalidate"

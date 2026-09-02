@@ -41,7 +41,7 @@ Open http://127.0.0.1:8000 — no migrations or database setup required, ever.
 | `GROQ_API_KEY` | Yes | Get one at https://console.groq.com/keys |
 | `SECRET_KEY` | Yes (prod) | Random Django secret key |
 | `DEBUG` | No | Default `False` — keep off in production |
-| `GROQ_MODEL` | No | Default `llama-3.3-70b-versatile` (or `mixtral-8x7b-32768`) |
+| `GROQ_MODEL` | No | Default `openai/gpt-oss-120b`; override with a model available to your Groq account |
 | `ALLOWED_HOSTS` | No prod | Comma-separated hostnames |
 | `CSRF_TRUSTED_ORIGINS` | No prod | Comma-separated origins (`https://...`) |
 
@@ -69,14 +69,9 @@ Open http://127.0.0.1:8000 — no migrations or database setup required, ever.
 
 ## Deploying to Vercel (Serverless)
 
-Add a `vercel.json` at the repo root:
-
-```json
-{
-  "builds": [{ "src": "backend/ai/wsgi.py", "use": "@vercel/python", "config": { "maxLambdaSize": "15mb" } }],
-  "routes": [{ "src": "/(.*)", "dest": "backend/ai/wsgi.py" }]
-}
-```
+The repository already includes `vercel.json`. It routes `/api/index.py` to the
+Django WSGI application and serves `frontend/static` directly, so do not replace
+it with a WSGI-only configuration or the frontend assets will stop loading.
 
 Note: serverless platforms buffer streaming responses inconsistently; Render/Railway
 (WSGI) give the smoothest SSE token streaming. Set `GROQ_API_KEY` and `SECRET_KEY`
@@ -100,8 +95,8 @@ is limited to 10 requests per minute per IP. Reusing a request ID is rejected to
 prevent accidental duplicate submissions.
 
 Run `python scripts/validate_env.py` before deployment to validate `.env`.
-Markdown output is sanitized in the browser with DOMPurify, and static assets are
-served with compression and a one-hour cache lifetime. Configure
+Markdown output is sanitized in the browser with DOMPurify. Static assets are
+served with compression, content-versioned URLs, and revalidation headers. Configure
 `CORS_ALLOWED_ORIGINS` explicitly when the frontend is hosted on another origin.
 
 ## Quality checks

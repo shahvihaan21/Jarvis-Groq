@@ -21,6 +21,20 @@ def test_chat_api_validates_history():
     assert response.status_code == 400
 
 
+def test_chat_api_ignores_malformed_history_entries():
+    response = Client().post(
+        "/api/chat/",
+        data=json.dumps(payload(history=[None, {"role": "user", "content": 123}])),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+
+
+def test_chat_api_validates_message_type():
+    response = Client().post("/api/chat/", data=json.dumps(payload(message=123)), content_type="application/json")
+    assert response.status_code == 400
+
+
 @patch("todo.views.get_groq_client")
 def test_chat_api_streams_completion(mock_client):
     class Delta:

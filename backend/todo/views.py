@@ -107,7 +107,10 @@ def chat_api(request):
         data = json.loads(request.body) if request.body else {}
         if not isinstance(data, dict):
             return JsonResponse({"error": "JSON object expected"}, status=400)
-        prompt = (data.get("message") or "").strip()
+        raw_prompt = data.get("message")
+        if not isinstance(raw_prompt, str):
+            return JsonResponse({"error": "Message content must be a string"}, status=400)
+        prompt = raw_prompt.strip()
         raw_history = data.get("history", [])
         request_id = str(data.get("request_id") or "")
 
@@ -130,8 +133,13 @@ def chat_api(request):
         # Sanitise client-supplied history (whitelist roles & enforce length limits)
         history = []
         for msg in raw_history[-MAX_HISTORY_TURNS:]:
+            if not isinstance(msg, dict):
+                continue
             role = msg.get("role")
-            content = (msg.get("content") or "").strip()
+            raw_content = msg.get("content")
+            if not isinstance(raw_content, str):
+                continue
+            content = raw_content.strip()
             if role in ("user", "assistant") and content:
                 history.append({"role": role, "content": content[:MAX_MESSAGE_CHARS]})
 

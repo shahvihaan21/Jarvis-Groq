@@ -49,7 +49,9 @@ def get_groq_client() -> Groq:
 def index(request):
     active_model = os.getenv("GROQ_MODEL", GROQ_MODEL)
     response = render(request, "todo/index.html", {"model_name": active_model})
-    response["Cache-Control"] = "public, max-age=3600"
+    # The HTML shell references mutable CSS/JS files. Revalidate it on every
+    # request so frontend updates are not hidden behind a one-hour cache.
+    response["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
 

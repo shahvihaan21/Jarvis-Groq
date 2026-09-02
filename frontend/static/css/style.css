@@ -635,6 +635,57 @@ body.light-theme .btn-stop { background: #fff1f2; color: #be123c; border-color: 
 body.light-theme .text-success { color: var(--accent) !important; }
 body.light-theme .text-secondary { color: var(--text-secondary) !important; }
 
+/* Final interaction polish shared by both themes. */
+button, .prompt-card, .thread-item, .conversation-search, .input-card, .icon-btn, .theme-toggle, .btn-tool {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn-tool, .theme-toggle, .icon-btn, .btn-new-chat, .btn-send, .btn-stop {
+    min-height: 36px;
+}
+
+.btn-tool:active, .theme-toggle:active, .icon-btn:active, .btn-new-chat:active, .btn-send:active {
+    transform: translateY(1px);
+}
+
+.chat-input-wrapper > form {
+    width: min(100%, 980px);
+    margin-inline: auto;
+}
+
+.chat-textarea {
+    line-height: 1.5;
+}
+
+body.light-theme .chat-input-wrapper {
+    border-top-color: var(--border);
+}
+
+body.light-theme .sidebar-actions .btn-tool {
+    background: transparent;
+}
+
+body.light-theme .btn-new-chat:focus-visible,
+body.light-theme .btn-send:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+@media (max-width: 768px) {
+    .chat-input-wrapper > form { width: 100%; }
+    .hero-state { padding: 1.25rem .25rem; }
+    .hero-state h2 { font-size: clamp(1.55rem, 7vw, 2rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+    }
+}
+
 /* Interaction, accessibility and responsive polish */
 button, input, textarea, select { font: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--green-neon); outline-offset: 2px; }

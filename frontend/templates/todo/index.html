@@ -59,7 +59,7 @@
             <header class="chat-navbar">
                 <div class="d-flex align-items-center gap-3">
                     <button type="button" class="icon-btn sidebar-open" id="sidebarOpen" aria-label="Open conversations" title="Open conversations"><i class="fa-solid fa-bars"></i></button>
-                    <h5 class="fw-bold mb-0 text-light d-flex align-items-center gap-2">
+                    <h5 class="fw-bold mb-0 header-title d-flex align-items-center gap-2">
                         <i class="fa-solid fa-shield-halved text-success"></i>
                         <span>Jarvis AI</span>
                     </h5>
@@ -68,9 +68,8 @@
                     <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle light and dark mode" title="Toggle theme"><i class="fa-solid fa-sun"></i></button>
                     <button type="button" class="icon-btn" id="clearChatBtn" aria-label="Clear current conversation" title="Clear current conversation"><i class="fa-solid fa-broom"></i></button>
                     <button type="button" class="icon-btn" id="settingsBtn" aria-label="Open settings" title="Settings"><i class="fa-solid fa-sliders"></i></button>
-                    <span class="d-inline-block rounded-circle bg-success shadow-sm"
-                        style="width: 8px; height: 8px; box-shadow: 0 0 8px #00ff87;"></span>
-                    <span class="online-label">"AI-Assistant" Online</span>
+                    <span class="status-dot d-inline-block rounded-circle bg-success"></span>
+                    <span class="online-label">AI-Assistant Online</span>
                 </div>
             </header>
 
@@ -136,7 +135,7 @@
                     </div>
                 </form>
                 <div class="text-center text-secondary mt-2 fs-7"
-                    style="font-size: 0.75rem; color: #059669 !important;">
+                    style="font-size: 0.75rem;">
                     Enter to send · Shift+Enter for a new line · <button type="button" class="help-link" id="shortcutsBtn">Keyboard shortcuts</button>
                 </div>
             </div>

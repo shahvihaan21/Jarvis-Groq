@@ -108,6 +108,11 @@ STORAGES = {
 }
 WHITENOISE_MAX_AGE = 3600
 WHITENOISE_MANIFEST_STRICT = False
+# Serve directly from STATICFILES_DIRS so the app works without running
+# collectstatic first (covers local dev and bare serverless cold starts).
+WHITENOISE_USE_FINDERS = True
+if DEBUG:
+    WHITENOISE_AUTOREFRESH = True
 
 # Empty by default keeps cross-origin access disabled until explicitly configured.
 CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]

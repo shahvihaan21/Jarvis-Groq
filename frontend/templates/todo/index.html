@@ -1,11 +1,14 @@
-﻿{% load static %}
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis AI Assistant - Black &amp; Green Matrix Theme</title>
+    <title>Jarvis AI Assistant — Groq Technical Workbench</title>
+
+    <!-- Meta Description for SEO -->
+    <meta name="description" content="Jarvis AI Technical Workbench — Fast, stateless technical AI assistant powered by Groq.">
 
     <!-- Fonts & Styling Libraries -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,103 +23,188 @@
 <body>
 
     <div class="app-wrapper" id="appWrapper">
-        <!-- Sidebar -->
+        <!-- Sidebar Backdrop for Mobile -->
         <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
+
+        <!-- Sidebar -->
         <aside class="sidebar" id="sidebar" aria-label="Conversation sidebar">
             <div class="sidebar-header">
                 <div class="d-flex align-items-center justify-content-between mb-3">
                     <span class="brand-title d-flex align-items-center gap-2">
-                        <i class="fa-solid fa-earth text-success"></i> Jarvis AI
+                        <i class="fa-solid fa-terminal text-success"></i> Jarvis Workbench
                     </span>
                     <button type="button" class="icon-btn sidebar-close" id="sidebarClose" aria-label="Close conversations" title="Close sidebar"><i class="fa-solid fa-xmark"></i></button>
                 </div>
 
                 <button type="button" class="btn-new-chat" onclick="startNewChat();">
-                    <i class="fa-solid fa-plus"></i> New Chat
+                    <i class="fa-solid fa-plus me-1"></i> New Session
                 </button>
-                <div class="sidebar-actions">
-                    <button type="button" class="btn-tool" onclick="downloadChat()" title="Export chat"><i class="fa-solid fa-download"></i> Export</button>
-                    <button type="button" class="btn-tool" onclick="document.getElementById('importChatInput').click()" title="Import chat"><i class="fa-solid fa-upload"></i> Import</button>
+                <div class="sidebar-actions mt-2">
+                    <button type="button" class="btn-tool" onclick="openModal('exportModal')" title="Export session"><i class="fa-solid fa-download me-1"></i> Export</button>
+                    <button type="button" class="btn-tool" onclick="document.getElementById('importChatInput').click()" title="Import session"><i class="fa-solid fa-upload me-1"></i> Import</button>
                     <input id="importChatInput" type="file" accept="application/json" hidden onchange="importChat(event)">
                 </div>
-                <label class="conversation-search" for="conversationSearch">
+                <label class="conversation-search mt-2" for="conversationSearch">
                     <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                    <input id="conversationSearch" type="search" placeholder="Search conversations" autocomplete="off">
+                    <input id="conversationSearch" type="search" placeholder="Search sessions..." autocomplete="off">
                 </label>
             </div>
 
-            <!-- Thread History List (client-side only — history lives in the browser) -->
+            <!-- Thread History List -->
             <div class="threads-list">
-                <div class="threads-heading"><span>Conversations</span><span class="thread-count" id="threadCount">0</span></div>
+                <div class="threads-heading"><span>Sessions</span><span class="thread-count" id="threadCount">0</span></div>
                 <div id="threadsItems" aria-live="polite"></div>
-                <div class="threads-empty" id="threadsEmpty">Your saved conversations will appear here.</div>
+                <div class="threads-empty" id="threadsEmpty">Saved technical sessions appear here.</div>
             </div>
         </aside>
+
+        <!-- Resizable Sidebar Drag Handle -->
+        <div class="sidebar-resizer" id="sidebarResizer" role="separator" aria-label="Resize sidebar width" title="Drag to resize sidebar width"></div>
 
         <!-- Main Chat Panel -->
         <main class="main-chat">
             <!-- Navbar -->
             <header class="chat-navbar">
                 <div class="d-flex align-items-center gap-3">
-                    <button type="button" class="icon-btn sidebar-open" id="sidebarOpen" aria-label="Open conversations" title="Open conversations"><i class="fa-solid fa-bars"></i></button>
-                    <h5 class="fw-bold mb-0 header-title d-flex align-items-center gap-2">
+                    <button type="button" class="icon-btn sidebar-open" id="sidebarOpen" aria-label="Open sessions" title="Open sessions"><i class="fa-solid fa-bars"></i></button>
+                    <h1 class="fw-bold mb-0 header-title d-flex align-items-center gap-2 fs-5">
                         <i class="fa-solid fa-shield-halved text-success"></i>
                         <span>Jarvis AI</span>
-                    </h5>
+                    </h1>
+                    <span class="badge bg-dark-subtle text-success border border-success-subtle font-monospace px-2 py-1 fs-7" id="activeModelBadge">{{ model_name }}</span>
                 </div>
-                <div class="d-flex align-items-center gap-2 text-success fs-7 fw-semibold">
-                    <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle light and dark mode" title="Toggle theme"><i class="fa-solid fa-sun"></i></button>
-                    <button type="button" class="icon-btn" id="clearChatBtn" aria-label="Clear current conversation" title="Clear current conversation"><i class="fa-solid fa-broom"></i></button>
+
+                <div class="d-flex align-items-center gap-2">
+                    <!-- Status Indicator Badge -->
+                    <div class="ui-status-badge status-idle" id="uiStatusBadge" title="System Status">
+                        <span class="status-indicator-dot"></span>
+                        <span class="status-indicator-text" id="statusIndicatorText">Ready</span>
+                    </div>
+
+                    <button type="button" class="theme-toggle ms-2" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme"><i class="fa-solid fa-sun"></i></button>
+                    <button type="button" class="icon-btn" id="clearChatBtn" aria-label="Clear session" title="Clear current session"><i class="fa-solid fa-broom"></i></button>
                     <button type="button" class="icon-btn" id="settingsBtn" aria-label="Open settings" title="Settings"><i class="fa-solid fa-sliders"></i></button>
-                    <span class="status-dot d-inline-block rounded-circle bg-success"></span>
-                    <span class="online-label">AI Online </span>
+
+                    <!-- GitHub Repository Link replacing AI Online -->
+                    <a href="https://github.com/shahvihaan21/Jarvis-Groq" target="_blank" rel="noopener noreferrer" class="repo-link d-inline-flex align-items-center gap-1 ms-2" title="View Repository on GitHub">
+                        <i class="fa-brands fa-github"></i>
+                        <span>GitHub</span>
+                    </a>
                 </div>
             </header>
 
-            <!-- Messages Stream Area -->
-            <div class="messages-container" id="messagesContainer">
-                <!-- Hero Welcome State -->
-                <div class="hero-state">
-                    <div class="hero-icon"><i class="fa-solid fa-terminal"></i></div>
-                    <p class="eyebrow">JARVIS // READY</p>
-                    <h2 class="fw-bold mb-2">What are we building today?</h2>
-                    <p class="text-secondary mb-4">Ask anything — coding, explanations, writing, logic, or math.</p>
+            <!-- Persistent Technical Context Ingestion Zone -->
+            <section class="ingestion-zone collapsed" id="ingestionZone" aria-label="Context Ingestion Zone">
+                <div class="ingestion-header" onclick="toggleIngestionZone()">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-boxes-stacked text-success"></i>
+                        <span class="fw-semibold">Context Ingestion Zone</span>
+                        <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-0 fs-8 ms-1" id="activeContextCount">0 items attached</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn-tool btn-sm" onclick="event.stopPropagation(); clearIngestionContext();" title="Clear attached context"><i class="fa-solid fa-eraser me-1"></i> Clear</button>
+                        <i class="fa-solid fa-chevron-down ingestion-toggle-icon" id="ingestionToggleIcon"></i>
+                    </div>
+                </div>
 
-                    <!-- Prompt Starter Suggestions -->
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <button type="button" class="prompt-card" onclick="sendStarterPrompt('Software Engineering Apps')">
-                                <div class="fw-semibold text-success mb-1"><i class="fa-solid fa-bolt me-2"></i>Software
-                                    Engineering</div>
-                                <small class="text-secondary">Explore ideas for a software project.</small>
-                            </button>
-                        </div>
-                        <div class="col-md-6">
-                            <button type="button" class="prompt-card"
-                                onclick="sendStarterPrompt('Write a Python script for web scraping with BeautifulSoup')">
-                                <div class="fw-semibold text-success mb-1"><i class="fa-solid fa-code me-2"></i>Python
-                                    Scraping</div>
-                                <small class="text-secondary">Build a BeautifulSoup and Requests script.</small>
-                            </button>
-                        </div>
-                        <div class="col-md-6">
-                            <button type="button" class="prompt-card"
-                                onclick="sendStarterPrompt('What are the top 5 best practices for Django security?')">
-                                <div class="fw-semibold text-success mb-1"><i
-                                        class="fa-solid fa-shield-halved me-2"></i>Django Security</div>
-                                <small class="text-secondary">What are the top security best practices for Django
-                                    applications?</small>
-                            </button>
-                        </div>
-                        <div class="col-md-6">
-                            <button type="button" class="prompt-card"
-                                onclick="sendStarterPrompt('Draft a professional tech project proposal email')">
-                                <div class="fw-semibold text-success mb-1"><i
-                                        class="fa-solid fa-paper-plane me-2"></i>Project Proposal</div>
-                                <small class="text-secondary">Draft a clean professional project proposal email.</small>
-                            </button>
+                <div class="ingestion-body" id="ingestionBody">
+                    <!-- Secret Detection Security Alert Banner -->
+                    <div class="secret-alert-banner d-none" id="secretAlertBanner" role="alert">
+                        <i class="fa-solid fa-triangle-exclamation text-warning me-2 fs-6"></i>
+                        <div class="flex-grow-1">
+                            <strong class="d-block text-warning mb-1">Security Warning: Potential Secrets Detected!</strong>
+                            <small class="text-secondary" id="secretAlertMessage">API keys, tokens, or credentials were detected in input text. They have been automatically redacted to <code>[REDACTED_SECRET]</code> to prevent accidental transmission.</small>
                         </div>
                     </div>
+
+                    <!-- Project Metadata Bar -->
+                    <div class="project-meta-row row g-2 mb-3">
+                        <div class="col-md-4">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-dark border-secondary text-secondary"><i class="fa-solid fa-folder-open"></i></span>
+                                <input type="text" class="form-control form-control-sm bg-dark border-secondary text-light font-monospace" id="metaProjectName" placeholder="Project: e.g. Jarvis-Groq" onchange="saveProjectMeta()">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-dark border-secondary text-secondary"><i class="fa-solid fa-code-branch"></i></span>
+                                <input type="text" class="form-control form-control-sm bg-dark border-secondary text-light font-monospace" id="metaTechStack" placeholder="Stack: e.g. Django, JS, Groq" onchange="saveProjectMeta()">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-dark border-secondary text-secondary"><i class="fa-solid fa-server"></i></span>
+                                <input type="text" class="form-control form-control-sm bg-dark border-secondary text-light font-monospace" id="metaTargetEnv" placeholder="Env: e.g. Production / Local" onchange="saveProjectMeta()">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Context Panels Grid -->
+                    <div class="row g-3">
+                        <!-- Drag & Drop File Zone -->
+                        <div class="col-md-6 col-lg-3">
+                            <div class="ingestion-card drag-drop-area" id="dragDropArea" onclick="document.getElementById('fileContextInput').click()">
+                                <i class="fa-solid fa-file-code fa-2x text-success mb-2"></i>
+                                <span class="fw-semibold d-block fs-7 mb-1">Drag &amp; Drop Files / Code</span>
+                                <small class="text-secondary d-block fs-8">Click or drop .py, .js, .json, .md, .txt, .log</small>
+                                <input type="file" id="fileContextInput" multiple hidden onchange="handleFileIngestion(event)">
+                            </div>
+                        </div>
+
+                        <!-- Technical Scratchpad -->
+                        <div class="col-md-6 col-lg-3">
+                            <div class="ingestion-card">
+                                <label for="scratchpadInput" class="ingestion-card-label"><i class="fa-solid fa-note-sticky text-warning me-1"></i> Technical Scratchpad</label>
+                                <textarea id="scratchpadInput" class="form-control form-control-sm ingestion-textarea font-monospace" placeholder="Paste notes, requirements, or architecture notes..." oninput="handleScratchpadInput()"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Log & Stacktrace Ingestion -->
+                        <div class="col-md-6 col-lg-3">
+                            <div class="ingestion-card">
+                                <label for="logIngestionInput" class="ingestion-card-label"><i class="fa-solid fa-bug text-danger me-1"></i> Log / Stacktrace Input</label>
+                                <textarea id="logIngestionInput" class="form-control form-control-sm ingestion-textarea font-monospace" placeholder="Paste stack traces or server logs here..." oninput="handleLogInput()"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Env & Config Context Input -->
+                        <div class="col-md-6 col-lg-3">
+                            <div class="ingestion-card">
+                                <label for="envConfigInput" class="ingestion-card-label"><i class="fa-solid fa-sliders text-info me-1"></i> Env / Config Context</label>
+                                <textarea id="envConfigInput" class="form-control form-control-sm ingestion-textarea font-monospace" placeholder="Paste env/config (Secrets automatically redacted)..." oninput="handleEnvConfigInput()"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Artifacts & Active Context Chips -->
+                    <div class="active-artifacts-row mt-3">
+                        <span class="fs-8 text-secondary fw-semibold text-uppercase me-2"><i class="fa-solid fa-paperclip me-1"></i> Attached Artifacts:</span>
+                        <div class="artifacts-chips-container" id="artifactsChipsContainer">
+                            <span class="text-secondary fs-8 italic opacity-75">No context items attached. Drag files or paste notes above.</span>
+                        </div>
+                    </div>
+
+                    <!-- Quick-Fire Technical Command Buttons -->
+                    <div class="quick-fire-bar mt-3 pt-2 border-top border-secondary border-opacity-25">
+                        <span class="fs-8 text-secondary fw-semibold text-uppercase me-2"><i class="fa-solid fa-bolt text-warning me-1"></i> Technical Actions:</span>
+                        <div class="d-inline-flex flex-wrap gap-2">
+                            <button type="button" class="quick-cmd-btn" onclick="triggerQuickCommand('Explain Architecture')"><i class="fa-solid fa-sitemap me-1 text-success"></i> Explain Architecture</button>
+                            <button type="button" class="quick-cmd-btn" onclick="triggerQuickCommand('Debug Stacktrace')"><i class="fa-solid fa-bug me-1 text-danger"></i> Debug Stacktrace</button>
+                            <button type="button" class="quick-cmd-btn" onclick="triggerQuickCommand('Refactor Code')"><i class="fa-solid fa-code me-1 text-info"></i> Refactor Code</button>
+                            <button type="button" class="quick-cmd-btn" onclick="triggerQuickCommand('Security Audit')"><i class="fa-solid fa-shield-halved me-1 text-warning"></i> Security Audit</button>
+                            <button type="button" class="quick-cmd-btn" onclick="triggerQuickCommand('Generate Tests')"><i class="fa-solid fa-vial me-1 text-success"></i> Generate Tests</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Messages Stream Area -->
+            <div class="messages-container" id="messagesContainer">
+                <div class="hero-state" id="heroWelcomeState">
+                    <div class="hero-icon"><i class="fa-solid fa-terminal"></i></div>
+                    <p class="eyebrow">JARVIS WORKBENCH // STATELENGTH INFERENCE</p>
+                    <h2 class="fw-bold mb-2">Technical AI Engineering Environment</h2>
+                    <p class="text-secondary mb-3">Attach code, paste stack traces, configure context above, or ask any technical prompt.</p>
                 </div>
             </div>
 
@@ -126,39 +214,75 @@
                     {% csrf_token %}
                     <div class="input-card">
                         <textarea id="promptInput" class="chat-textarea" rows="1"
-                            placeholder="Type your message to Jarvis..." onkeydown="checkEnter(event)"></textarea>
-                        <button type="button" class="btn-stop" id="stopBtn" title="Stop generating" aria-label="Stop generating"><i class="fa-solid fa-stop"></i></button>
+                            placeholder="Describe technical task, prompt, or command..." onkeydown="checkEnter(event)"></textarea>
+                        <button type="button" class="btn-stop" id="stopBtn" title="Stop generating" aria-label="Stop generating" hidden><i class="fa-solid fa-stop"></i> Stop</button>
                         <button type="submit" class="btn-send" id="sendBtn" title="Send message (Enter)" aria-label="Send message">
                             <i class="fa-solid fa-paper-plane"></i>
                         </button>
                     </div>
                 </form>
-                <div class="text-center text-secondary mt-2 fs-7"
-                    style="font-size: 0.75rem;">
-                    Enter to send · Shift+Enter for a new line · <button type="button" class="help-link" id="shortcutsBtn">Keyboard shortcuts</button>
+                <div class="text-center text-secondary mt-2 fs-7" style="font-size: 0.75rem;">
+                    Enter to send · Shift+Enter for newline · <button type="button" class="help-link" id="shortcutsBtn">Shortcuts</button>
                 </div>
             </div>
         </main>
     </div>
 
+    <!-- Export Modal -->
+    <div class="modal-shell" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportTitle" hidden>
+        <div class="modal-card">
+            <div class="modal-heading">
+                <div>
+                    <p class="eyebrow">EXPORT SESSION</p>
+                    <h2 id="exportTitle">Export Session Data</h2>
+                </div>
+                <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close export modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <p class="text-secondary fs-7 mb-4">Choose format to export the active conversation history:</p>
+            <div class="d-flex gap-3">
+                <button type="button" class="btn btn-outline-success flex-grow-1 py-2 fw-semibold" onclick="downloadChat('markdown')">
+                    <i class="fa-regular fa-file-lines me-2"></i> Markdown (.md)
+                </button>
+                <button type="button" class="btn btn-outline-info flex-grow-1 py-2 fw-semibold" onclick="downloadChat('json')">
+                    <i class="fa-brackets-curly me-2"></i> JSON (.json)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
     <div class="modal-shell" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
         <div class="modal-card">
-            <div class="modal-heading"><div><p class="eyebrow">PREFERENCES</p><h2 id="settingsTitle">Settings</h2></div><button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="modal-heading">
+                <div><p class="eyebrow">PREFERENCES</p><h2 id="settingsTitle">Workbench Settings</h2></div>
+                <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close settings"><i class="fa-solid fa-xmark"></i></button>
+            </div>
             <label class="setting-row">Theme<select id="themeSetting"><option value="dark">Matrix dark</option><option value="light">Soft light</option></select></label>
             <label class="setting-row">Message size<select id="fontSetting"><option value="small">Compact</option><option value="medium">Comfortable</option><option value="large">Large</option></select></label>
             <label class="setting-row">Message density<select id="densitySetting"><option value="compact">Compact</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option></select></label>
             <label class="setting-check"><input type="checkbox" id="timestampsSetting"> Show timestamps</label>
         </div>
     </div>
+
+    <!-- Shortcuts Modal -->
     <div class="modal-shell" id="shortcutsModal" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle" hidden>
-        <div class="modal-card shortcuts-card"><div class="modal-heading"><h2 id="shortcutsTitle">Keyboard shortcuts</h2><button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close shortcuts"><i class="fa-solid fa-xmark"></i></button></div><div class="shortcut-row"><span>New chat</span><kbd>Ctrl / Cmd</kbd><kbd>K</kbd></div><div class="shortcut-row"><span>Send message</span><kbd>Enter</kbd></div><div class="shortcut-row"><span>New line</span><kbd>Shift</kbd><kbd>Enter</kbd></div><div class="shortcut-row"><span>Close panel</span><kbd>Esc</kbd></div></div>
+        <div class="modal-card shortcuts-card">
+            <div class="modal-heading">
+                <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
+                <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close shortcuts"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="shortcut-row"><span>New session</span><kbd>Ctrl / Cmd</kbd><kbd>K</kbd></div>
+            <div class="shortcut-row"><span>Send message</span><kbd>Enter</kbd></div>
+            <div class="shortcut-row"><span>New line</span><kbd>Shift</kbd><kbd>Enter</kbd></div>
+            <div class="shortcut-row"><span>Toggle context zone</span><kbd>Ctrl / Cmd</kbd><kbd>I</kbd></div>
+            <div class="shortcut-row"><span>Close modal</span><kbd>Esc</kbd></div>
+        </div>
     </div>
 
-    <!-- Scripts: Marked.js for Markdown & Highlight.js for Syntax Highlighting -->
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <!-- Custom Modular Frontend Script -->
     <script src="{% static 'js/chat.js' %}?v={{ frontend_version }}"></script>
 </body>
 

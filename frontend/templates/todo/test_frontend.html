@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Jarvis AI Frontend Test Suite</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-dark text-light p-4 font-monospace">
+    <div class="container">
+        <h2 class="text-success mb-3">🧪 Jarvis AI Frontend Unit Test Suite</h2>
+        <div id="testResults" class="list-group mb-4"></div>
+        <button class="btn btn-success" onclick="runSuite()">Re-run Unit Tests</button>
+    </div>
+
+    <!-- Load chat script dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <!-- Load chat engine -->
+    <script src="/static/js/chat.js"></script>
+
+    <script>
+        function assert(condition, message) {
+            const results = document.getElementById('testResults');
+            const item = document.createElement('div');
+            if (condition) {
+                item.className = 'list-group-item list-group-item-success bg-success-subtle text-success border-success';
+                item.textContent = `PASS: ${message}`;
+            } else {
+                item.className = 'list-group-item list-group-item-danger bg-danger-subtle text-danger border-danger';
+                item.textContent = `FAIL: ${message}`;
+            }
+            results.appendChild(item);
+        }
+
+        function runSuite() {
+            document.getElementById('testResults').innerHTML = '';
+
+            // Test 1: Secret Detection & Redaction (Groq Key)
+            const secretRes1 = detectAndRedactSecrets("My key is gsk_123456789012345678901234567890 in env");
+            assert(secretRes1.hasSecrets === true, "Secret detection identifies Groq API key format");
+            assert(secretRes1.redactedText.includes("[REDACTED_SECRET]"), "Groq API key is redacted to [REDACTED_SECRET]");
+
+            // Test 2: Secret Detection & Redaction (Clean text)
+            const cleanRes = detectAndRedactSecrets("This is plain public technical context text.");
+            assert(cleanRes.hasSecrets === false, "Clean text has no false positive secrets");
+            assert(cleanRes.redactedText === "This is plain public technical context text.", "Clean text is preserved intact");
+
+            // Test 3: Markdown Sanitization
+            const rawMd = "### Heading\n\n```python\nprint('hello')\n```\n<script>alert(1)</script>";
+            const safeHtml = safeMarkdown(rawMd);
+            assert(!safeHtml.includes("<script>"), "DOMPurify removes XSS script tags");
+            assert(safeHtml.includes("Heading"), "Marked parses markdown headings");
+
+            // Test 4: UI State management transition
+            setUIState('connecting', 'Connecting test');
+            assert(uiState === 'connecting', "UI state sets to connecting");
+            setUIState('idle');
+            assert(uiState === 'idle', "UI state resets to idle");
+
+            // Test 5: Default Sidebar Width calculation
+            localStorage.removeItem('jarvisSidebarWidth');
+            const appWrapper = document.createElement('div');
+            appWrapper.id = 'appWrapper';
+            document.body.appendChild(appWrapper);
+            setSidebarWidth(300);
+            assert(localStorage.getItem('jarvisSidebarWidth') === '300', "Sidebar width persists in localStorage");
+        }
+
+        window.onload = runSuite;
+    </script>
+</body>
+</html>

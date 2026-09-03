@@ -1,4 +1,4 @@
-﻿"""
+"""
 Django settings for the Jarvis AI project — 100% stateless & database-free.
 
 - Serverless-ready for Vercel, Render, and Railway.
@@ -77,6 +77,17 @@ WSGI_APPLICATION = "ai.wsgi.application"
 # ---------------------------------------------------------------------------
 
 DATABASES = {}
+
+# ---------------------------------------------------------------------------
+# Cache — In-memory local cache for rate limiting and request idempotency
+# ---------------------------------------------------------------------------
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jarvis-stateless-cache",
+    }
+}
 
 # ---------------------------------------------------------------------------
 # Static files (Whitenoise + Vercel static)

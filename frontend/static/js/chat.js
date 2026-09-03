@@ -1,49 +1,1098 @@
-// Jarvis AI frontend. Conversations and preferences are intentionally local-only.
-let chatHistory = [], activeConversationId = null, isGenerating = false, activeController = null, shouldStickToBottom = true;
-const MAX_HISTORY_TURNS = 12, MAX_MESSAGE_CHARS = 8000, STORAGE_KEY = 'jarvisConversations', SETTINGS_KEY = 'jarvisSettings', legacyHistoryKey = 'jarvisChatHistory';
+// Jarvis AI Technical Workbench — Groq Provider Frontend Engine
+// State management, SSE resilience, resizable sidebar, and privacy-safe context ingestion.
+
+let chatHistory = [];
+let activeConversationId = null;
+let uiState = 'idle'; // 'idle' | 'connecting' | 'generating' | 'completed' | 'error'
+let activeController = null;
+let shouldStickToBottom = true;
+let ingestedArtifacts = []; // Array of attached context items { id, name, type, content }
+
+const MAX_HISTORY_TURNS = 12;
+const MAX_MESSAGE_CHARS = 8000;
+const STORAGE_KEY = 'jarvisConversations';
+const SETTINGS_KEY = 'jarvisSettings';
+const SIDEBAR_WIDTH_KEY = 'jarvisSidebarWidth';
+const PROJECT_META_KEY = 'jarvisProjectMeta';
+
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 480;
+const DEFAULT_SIDEBAR_WIDTH = 280;
+
 const defaultSettings = { theme: 'dark', font: 'medium', density: 'comfortable', timestamps: false };
-function getSettings(){try{return {...defaultSettings,...JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}')}}catch(_){return {...defaultSettings}}}
-function saveSettings(s){localStorage.setItem(SETTINGS_KEY,JSON.stringify(s));applySettings(s)}
-function getConversations(){try{const x=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');return Array.isArray(x)?x:[]}catch(_){return []}}
-function saveConversations(x){localStorage.setItem(STORAGE_KEY,JSON.stringify(x));renderConversationList()}
-function makeConversation(messages=[]){return{id:crypto.randomUUID(),title:titleFor(messages),messages,createdAt:Date.now(),updatedAt:Date.now()}}
-function titleFor(messages){const m=messages.find(x=>x.role==='user');return m?m.content.replace(/\s+/g,' ').trim().slice(0,48):'New conversation'}
-function activeConversation(){return getConversations().find(x=>x.id===activeConversationId)}
-function syncActiveConversation(){const all=getConversations(),i=all.findIndex(x=>x.id===activeConversationId);if(i<0||!chatHistory.length)return;all[i].messages=chatHistory;all[i].title=titleFor(chatHistory);all[i].updatedAt=Date.now();saveConversations(all)}
-function safeMarkdown(text){return DOMPurify.sanitize(marked.parse(text||'',{breaks:true,gfm:true}),{USE_PROFILES:{html:true}})}
-function renderMarkdown(text){if(!text)return'';const el=document.createElement('div');el.innerHTML=safeMarkdown(text);el.querySelectorAll('pre code').forEach(x=>{try{hljs.highlightElement(x)}catch(_){}});addCopyButtons(el);return el.innerHTML}
-function addCopyButtons(container){container.querySelectorAll('pre').forEach(pre=>{if(pre.querySelector('.copy-btn'))return;const code=pre.querySelector('code'),lang=(code?.className.match(/language-([\w-]+)/)||[])[1],bar=document.createElement('div');bar.className='code-toolbar';if(lang){const label=document.createElement('span');label.className='code-language';label.textContent=lang;bar.appendChild(label)}const b=document.createElement('button');b.className='copy-btn';b.type='button';b.innerHTML='<i class="fa-regular fa-copy"></i> Copy';b.setAttribute('aria-label','Copy code');b.onclick=async()=>{try{await navigator.clipboard.writeText(code?code.innerText:pre.innerText);b.innerHTML='<i class="fa-solid fa-check"></i> Copied';setTimeout(()=>b.innerHTML='<i class="fa-regular fa-copy"></i> Copy',1600)}catch(_){b.textContent='Copy failed'}};bar.appendChild(b);pre.prepend(bar)})}
-function scrollToBottom(force=false){const c=document.getElementById('messagesContainer');if(c&&(force||shouldStickToBottom))c.scrollTop=c.scrollHeight}
-function checkScrollPosition(){const c=document.getElementById('messagesContainer');if(c)shouldStickToBottom=c.scrollHeight-c.scrollTop-c.clientHeight<100}
-function resizeComposer(){const x=document.getElementById('promptInput');if(x){x.style.height='auto';x.style.height=`${Math.min(x.scrollHeight,160)}px`}}
-function checkEnter(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('chatForm')?.requestSubmit()}}
-function sendStarterPrompt(text){const x=document.getElementById('promptInput');if(!x||isGenerating)return;x.value=text;resizeComposer();document.getElementById('chatForm')?.requestSubmit()}
-function closeSidebar(){document.getElementById('appWrapper')?.classList.remove('sidebar-visible')}
-function openSidebar(){document.getElementById('appWrapper')?.classList.add('sidebar-visible')}
-function openModal(id){const m=document.getElementById(id);if(m){m.hidden=false;m.querySelector('button,select,input')?.focus()}}
-function closeModals(){document.querySelectorAll('.modal-shell').forEach(x=>x.hidden=true)}
-function applySettings(s){document.body.classList.toggle('light-theme',s.theme==='light');document.body.dataset.font=s.font;document.body.dataset.density=s.density;const icon=document.querySelector('#themeToggle i');if(icon){icon.classList.toggle('fa-sun',s.theme!=='light');icon.classList.toggle('fa-moon',s.theme==='light')}const map={themeSetting:s.theme,fontSetting:s.font,densitySetting:s.density,timestampsSetting:s.timestamps};Object.entries(map).forEach(([id,v])=>{const e=document.getElementById(id);if(e)e[e.type==='checkbox'?'checked':'value']=v})}
-function toggleTheme(){const s=getSettings();s.theme=s.theme==='light'?'dark':'light';saveSettings(s)}
-function renderConversationList(){const list=document.getElementById('threadsItems'),empty=document.getElementById('threadsEmpty'),q=(document.getElementById('conversationSearch')?.value||'').toLowerCase();if(!list)return;list.innerHTML='';const items=getConversations().filter(c=>(c.title||'').toLowerCase().includes(q)).sort((a,b)=>b.updatedAt-a.updatedAt);document.getElementById('threadCount').textContent=items.length;empty.hidden=items.length>0;items.forEach(c=>{const item=document.createElement('div');item.className=`thread-item ${c.id===activeConversationId?'active':''}`;item.tabIndex=0;item.setAttribute('role','button');const t=document.createElement('span');t.className='thread-title';t.textContent=c.title||'New conversation';const actions=document.createElement('span');actions.className='thread-actions';const r=actionButton('Rename conversation','fa-pen',e=>{e.stopPropagation();renameConversation(c.id)}),d=actionButton('Delete conversation','fa-trash',e=>{e.stopPropagation();deleteConversation(c.id)});r.className='thread-action';d.className='thread-action danger';actions.append(r,d);item.append(t,actions);item.onclick=()=>selectConversation(c.id);item.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectConversation(c.id)}};list.appendChild(item)})}
-function selectConversation(id){if(isGenerating)return;activeConversationId=id;chatHistory=activeConversation()?.messages||getConversations().find(x=>x.id===id)?.messages||[];renderMessages();renderConversationList();closeSidebar()}
-function startNewChat(){if(isGenerating)stopGeneration();activeConversationId=null;chatHistory=[];renderMessages();renderConversationList();document.getElementById('promptInput')?.focus();closeSidebar()}
-function renameConversation(id){const all=getConversations(),c=all.find(x=>x.id===id);if(!c)return;const name=window.prompt('Conversation name',c.title);if(name?.trim()){c.title=name.trim().slice(0,80);c.updatedAt=Date.now();saveConversations(all)}}
-function deleteConversation(id){const c=getConversations().find(x=>x.id===id);if(!c||!window.confirm(`Delete “${c.title}”?`))return;localStorage.setItem(STORAGE_KEY,JSON.stringify(getConversations().filter(x=>x.id!==id)));if(id===activeConversationId)startNewChat();else renderConversationList()}
-function clearCurrentConversation(){if(!chatHistory.length)return;if(window.confirm('Clear this conversation?')){localStorage.setItem(STORAGE_KEY,JSON.stringify(getConversations().filter(x=>x.id!==activeConversationId)));startNewChat()}}
-function actionButton(label,icon,fn){const b=document.createElement('button');b.type='button';b.className='message-action';b.title=label;b.setAttribute('aria-label',label);b.innerHTML=`<i class="fa-solid ${icon}"></i>`;b.onclick=fn;return b}
-async function copyText(text){try{await navigator.clipboard.writeText(text)}catch(_){} }
-function messageElement(m,index){const w=document.createElement('div');w.className=`msg-wrapper ${m.role==='user'?'user':'ai'}`;w.dataset.index=index;const bubble=document.createElement('div');bubble.className='msg-bubble';const content=document.createElement('div');content.className='msg-content';content.innerHTML=renderMarkdown(m.content);bubble.appendChild(content);const footer=document.createElement('div');footer.className='message-footer';if(getSettings().timestamps&&m.time){const time=document.createElement('time');time.textContent=m.time;footer.appendChild(time)}const actions=document.createElement('div');actions.className='message-actions';if(m.role==='user')actions.appendChild(actionButton('Edit message','fa-pen',()=>editUserMessage(index)));else actions.append(actionButton('Copy response','fa-copy',()=>copyText(m.content)),actionButton('Regenerate response','fa-rotate-right',()=>regenerate(index)));footer.appendChild(actions);bubble.appendChild(footer);w.innerHTML=`<div class="avatar"><i class="fa-solid fa-${m.role==='user'?'user':'brain'}"></i></div>`;w.appendChild(bubble);return w}
-function emptyState(){const d=document.createElement('div');d.className='hero-state';d.innerHTML=`<div class="hero-icon"><i class="fa-solid fa-terminal"></i></div><p class="eyebrow">JARVIS // READY</p><h2 class="fw-bold mb-2">What are we building today?</h2><p class="text-secondary mb-4">Ask anything — coding, explanations, writing, logic, or math.</p><div class="row g-3"><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('Software Engineering Apps')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-bolt me-2"></i>Software Engineering</span><small>Explore ideas for a software project.</small></button></div><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('Write a Python script for web scraping with BeautifulSoup')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-code me-2"></i>Python Scraping</span><small>Build a BeautifulSoup and Requests script.</small></button></div><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('What are the top 5 best practices for Django security?')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-shield-halved me-2"></i>Django Security</span><small>Review practical application safeguards.</small></button></div><div class="col-md-6"><button type="button" class="prompt-card" onclick="sendStarterPrompt('Draft a professional tech project proposal email')"><span class="fw-semibold text-success d-block mb-1"><i class="fa-solid fa-paper-plane me-2"></i>Project Proposal</span><small>Draft a polished proposal email.</small></button></div></div>`;return d}
-function renderMessages(){const c=document.getElementById('messagesContainer');if(!c)return;c.innerHTML='';if(!chatHistory.length){c.appendChild(emptyState());return}chatHistory.forEach((m,i)=>c.appendChild(messageElement(m,i)));scrollToBottom(true)}
-function ensureActiveConversation(){if(activeConversationId)return;const c=makeConversation();activeConversationId=c.id;localStorage.setItem(STORAGE_KEY,JSON.stringify([c,...getConversations()]))}
-function appendLiveMessage(role,text,time){const c=document.getElementById('messagesContainer');if(c.querySelector('.hero-state'))c.innerHTML='';const w=messageElement({role,content:text,time},chatHistory.length);c.appendChild(w);return w}
-function updateGeneratingState(on){isGenerating=on;document.getElementById('promptInput').disabled=on;document.getElementById('sendBtn').disabled=on;document.getElementById('stopBtn').hidden=!on;if(!on){document.getElementById('promptInput').focus();resizeComposer()}}
-function stopGeneration(){if(activeController)activeController.abort();updateGeneratingState(false);document.getElementById('aiTypingBubble')?.remove()}
-function editUserMessage(i){if(isGenerating||!chatHistory[i]||chatHistory[i].role!=='user')return;const input=document.getElementById('promptInput');input.value=chatHistory[i].content;chatHistory=chatHistory.slice(0,i);syncActiveConversation();renderMessages();resizeComposer();input.focus()}
-function regenerate(i){if(isGenerating||i<1||chatHistory[i].role!=='assistant')return;const prompt=chatHistory[i-1];if(!prompt||prompt.role!=='user')return;chatHistory=chatHistory.slice(0,i-1);renderMessages();sendPrompt(prompt.content)}
-async function handleSend(e){if(e)e.preventDefault();if(isGenerating)return;const input=document.getElementById('promptInput'),prompt=input?.value.trim();if(!prompt)return;if(prompt.length>MAX_MESSAGE_CHARS){window.alert(`Please keep messages under ${MAX_MESSAGE_CHARS} characters.`);return}input.value='';resizeComposer();sendPrompt(prompt)}
-async function sendPrompt(prompt){ensureActiveConversation();updateGeneratingState(true);const csrf=document.querySelector('[name=csrfmiddlewaretoken]')?.value||'',requestId=crypto.randomUUID();appendLiveMessage('user',prompt,new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));const ai=document.createElement('div');ai.className='msg-wrapper ai';ai.id='aiTypingBubble';ai.innerHTML='<div class="avatar"><i class="fa-solid fa-brain"></i></div><div class="msg-bubble"><div class="msg-content"><div class="typing-indicator" aria-label="Jarvis is generating"><span></span><span></span><span></span><em>Generating</em></div></div></div>';document.getElementById('messagesContainer').appendChild(ai);scrollToBottom(true);activeController=new AbortController();let accumulated='';try{const response=await fetch('/api/chat/',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({message:prompt,history:chatHistory,request_id:requestId,stream:true}),signal:activeController.signal});if(!response.ok)throw new Error(`Server returned ${response.status}`);const content=ai.querySelector('.msg-content'),type=response.headers.get('content-type')||'';if(type.includes('text/event-stream')){const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop()||'';for(const line of lines)if(line.startsWith('data: ')){const event=JSON.parse(line.slice(6));if(event.type==='chunk'){accumulated+=event.delta;content.innerHTML=renderMarkdown(accumulated);scrollToBottom()}else if(event.type==='error')throw new Error(event.error||'The AI service is unavailable.')}}}else{const data=await response.json();if(data.status!=='success')throw new Error(data.error||'Failed to generate response.');accumulated=data.ai_message.content;content.innerHTML=renderMarkdown(accumulated)}if(accumulated){const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});chatHistory.push({role:'user',content:prompt,time},{role:'assistant',content:accumulated,time});chatHistory=chatHistory.slice(-MAX_HISTORY_TURNS);syncActiveConversation()}ai.remove();renderMessages()}catch(err){if(err.name!=='AbortError')ai.querySelector('.msg-content').innerHTML=`<div class="error-state"><i class="fa-solid fa-triangle-exclamation"></i><span>${escapeHtml(err.message||'Network error connecting to Jarvis AI server.')}</span></div>`}finally{activeController=null;updateGeneratingState(false)}}
-function escapeHtml(text){return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function downloadChat(){const c=activeConversation(),blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),messages:c?.messages||chatHistory},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`jarvis-chat-${Date.now()}.json`;a.click();URL.revokeObjectURL(a.href)}
-function importChat(event){const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result),messages=Array.isArray(data)?data:data.messages;if(!Array.isArray(messages)||messages.length>MAX_HISTORY_TURNS||messages.some(m=>!['user','assistant'].includes(m.role)||typeof m.content!=='string'||!m.content.trim()))throw new Error();const c=makeConversation(messages.map(m=>({role:m.role,content:m.content.slice(0,MAX_MESSAGE_CHARS)})));localStorage.setItem(STORAGE_KEY,JSON.stringify([c,...getConversations()]));activeConversationId=c.id;chatHistory=c.messages;renderMessages();renderConversationList()}catch(_){window.alert('That file is not a valid Jarvis chat export.')}event.target.value=''};reader.readAsText(file)}
-document.addEventListener('DOMContentLoaded',()=>{marked.setOptions({headerIds:false,mangle:false});applySettings(getSettings());try{const old=JSON.parse(sessionStorage.getItem(legacyHistoryKey)||'[]');if(old.length&&!getConversations().length){const c=makeConversation(old);localStorage.setItem(STORAGE_KEY,JSON.stringify([c]))}}catch(_){}const list=getConversations();if(list.length){activeConversationId=list[0].id;chatHistory=list[0].messages||[]}renderMessages();renderConversationList();document.getElementById('messagesContainer')?.addEventListener('scroll',checkScrollPosition);document.getElementById('promptInput')?.addEventListener('input',resizeComposer);document.getElementById('conversationSearch')?.addEventListener('input',renderConversationList);document.getElementById('sidebarOpen')?.addEventListener('click',openSidebar);document.getElementById('sidebarClose')?.addEventListener('click',closeSidebar);document.getElementById('sidebarBackdrop')?.addEventListener('click',closeSidebar);document.getElementById('stopBtn')?.addEventListener('click',stopGeneration);document.getElementById('clearChatBtn')?.addEventListener('click',clearCurrentConversation);document.getElementById('settingsBtn')?.addEventListener('click',()=>openModal('settingsModal'));document.getElementById('shortcutsBtn')?.addEventListener('click',()=>openModal('shortcutsModal'));document.querySelectorAll('[data-close-modal]').forEach(b=>b.addEventListener('click',closeModals));document.querySelectorAll('.modal-shell').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModals()}));['themeSetting','fontSetting','densitySetting','timestampsSetting'].forEach(id=>document.getElementById(id)?.addEventListener('change',()=>{const s=getSettings();s.theme=document.getElementById('themeSetting').value;s.font=document.getElementById('fontSetting').value;s.density=document.getElementById('densitySetting').value;s.timestamps=document.getElementById('timestampsSetting').checked;saveSettings(s);renderMessages()}));document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();startNewChat()}if(e.key==='Escape'){closeModals();closeSidebar()}});resizeComposer()});
+
+// ---------------------------------------------------------------------------
+// Security & Secret Redaction (Req 21)
+// ---------------------------------------------------------------------------
+
+const SECRET_PATTERNS = [
+    /gsk_[a-zA-Z0-9]{20,}/g,                        // Groq API keys
+    /sk-[a-zA-Z0-9]{20,}/g,                         // OpenAI API keys
+    /AKIA[0-9A-Z]{16}/g,                             // AWS Access Key IDs
+    /Bearer\s+[a-zA-Z0-9\._\-]{20,}/gi,              // Authorization Bearer tokens
+    /-----BEGIN\s+[A-Z\s]+PRIVATE\s+KEY-----[\s\S]*?-----END\s+[A-Z\s]+PRIVATE\s+KEY-----/g, // Private keys
+    /(?:password|secret|api_key|token|access_key)\s*[:=]\s*["']?([^\s"']{8,})["']?/gi, // Secret assignments
+];
+
+function detectAndRedactSecrets(text) {
+    if (!text || typeof text !== 'string') return { hasSecrets: false, redactedText: text || '' };
+    let hasSecrets = false;
+    let redacted = text;
+
+    SECRET_PATTERNS.forEach(pattern => {
+        if (pattern.test(redacted)) {
+            hasSecrets = true;
+            redacted = redacted.replace(pattern, '[REDACTED_SECRET]');
+        }
+    });
+
+    return { hasSecrets, redactedText: redacted };
+}
+
+function updateSecretAlert(hasSecrets) {
+    const banner = document.getElementById('secretAlertBanner');
+    if (banner) {
+        banner.classList.toggle('d-none', !hasSecrets);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocalStorage Persistence & Settings (Req 5)
+// ---------------------------------------------------------------------------
+
+function getSettings() {
+    try {
+        return { ...defaultSettings, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+    } catch (_) {
+        return { ...defaultSettings };
+    }
+}
+
+function saveSettings(s) {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    applySettings(s);
+}
+
+function getConversations() {
+    try {
+        const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        return Array.isArray(data) ? data : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function saveConversations(list) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    renderConversationList();
+}
+
+function makeConversation(messages = []) {
+    return {
+        id: crypto.randomUUID(),
+        title: titleFor(messages),
+        messages,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    };
+}
+
+function titleFor(messages) {
+    const userMsg = messages.find(x => x.role === 'user');
+    return userMsg ? userMsg.content.replace(/\s+/g, ' ').trim().slice(0, 48) : 'Technical Session';
+}
+
+function activeConversation() {
+    return getConversations().find(x => x.id === activeConversationId);
+}
+
+function syncActiveConversation() {
+    const all = getConversations();
+    const idx = all.findIndex(x => x.id === activeConversationId);
+    if (idx < 0 || !chatHistory.length) return;
+    all[idx].messages = chatHistory;
+    all[idx].title = titleFor(chatHistory);
+    all[idx].updatedAt = Date.now();
+    saveConversations(all);
+}
+
+// ---------------------------------------------------------------------------
+// Resizable Sidebar (Req 22)
+// ---------------------------------------------------------------------------
+
+function initSidebarResizer() {
+    const resizer = document.getElementById('sidebarResizer');
+    const appWrapper = document.getElementById('appWrapper');
+    if (!resizer || !appWrapper) return;
+
+    // Load saved width
+    const savedWidth = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY), 10);
+    const initialWidth = (savedWidth >= MIN_SIDEBAR_WIDTH && savedWidth <= MAX_SIDEBAR_WIDTH) ? savedWidth : DEFAULT_SIDEBAR_WIDTH;
+    setSidebarWidth(initialWidth);
+
+    let isDragging = false;
+
+    function onPointerDown(e) {
+        if (window.innerWidth <= 768) return; // Disable resizer on mobile overlay view
+        isDragging = true;
+        resizer.classList.add('is-dragging');
+        document.body.classList.add('is-resizing');
+        e.preventDefault();
+    }
+
+    function onPointerMove(e) {
+        if (!isDragging) return;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        let newWidth = clientX;
+        if (newWidth < MIN_SIDEBAR_WIDTH) newWidth = MIN_SIDEBAR_WIDTH;
+        if (newWidth > MAX_SIDEBAR_WIDTH) newWidth = MAX_SIDEBAR_WIDTH;
+        setSidebarWidth(newWidth);
+    }
+
+    function onPointerUp() {
+        if (!isDragging) return;
+        isDragging = false;
+        resizer.classList.remove('is-dragging');
+        document.body.classList.remove('is-resizing');
+    }
+
+    resizer.addEventListener('mousedown', onPointerDown);
+    resizer.addEventListener('touchstart', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('touchmove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchend', onPointerUp);
+}
+
+function setSidebarWidth(width) {
+    const appWrapper = document.getElementById('appWrapper');
+    if (appWrapper) {
+        appWrapper.style.setProperty('--sidebar-width', `${width}px`);
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, width);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UI State Management (Req 2)
+// ---------------------------------------------------------------------------
+
+function setUIState(newState, detailMessage = '') {
+    uiState = newState;
+    const badge = document.getElementById('uiStatusBadge');
+    const textEl = document.getElementById('statusIndicatorText');
+    const promptInput = document.getElementById('promptInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    const isBusy = (newState === 'connecting' || newState === 'generating');
+
+    if (promptInput) promptInput.disabled = isBusy;
+    if (sendBtn) sendBtn.disabled = isBusy;
+    if (stopBtn) stopBtn.hidden = !isBusy;
+
+    if (badge) {
+        badge.className = `ui-status-badge status-${newState}`;
+    }
+
+    if (textEl) {
+        switch (newState) {
+            case 'connecting':
+                textEl.textContent = detailMessage || 'Connecting...';
+                break;
+            case 'generating':
+                textEl.textContent = detailMessage || 'Generating...';
+                break;
+            case 'completed':
+                textEl.textContent = 'Completed';
+                break;
+            case 'error':
+                textEl.textContent = detailMessage || 'Error';
+                break;
+            case 'idle':
+            default:
+                textEl.textContent = 'Ready';
+                break;
+        }
+    }
+
+    if (!isBusy && promptInput) {
+        promptInput.focus();
+        resizeComposer();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Technical Context Ingestion Zone (Req 21)
+// ---------------------------------------------------------------------------
+
+function toggleIngestionZone() {
+    const zone = document.getElementById('ingestionZone');
+    if (zone) zone.classList.toggle('collapsed');
+}
+
+function handleFileIngestion(event) {
+    const files = event.target.files;
+    if (!files || !files.length) return;
+
+    let foundSecrets = false;
+    Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const rawContent = e.target.result || '';
+            const { hasSecrets, redactedText } = detectAndRedactSecrets(rawContent);
+            if (hasSecrets) foundSecrets = true;
+
+            ingestedArtifacts.push({
+                id: crypto.randomUUID(),
+                name: file.name,
+                type: 'file',
+                content: redactedText
+            });
+
+            renderArtifactChips();
+            updateSecretAlert(foundSecrets);
+        };
+        reader.readAsText(file);
+    });
+
+    event.target.value = '';
+}
+
+function handleScratchpadInput() {
+    const el = document.getElementById('scratchpadInput');
+    if (!el) return;
+    const val = el.value || '';
+    const { hasSecrets } = detectAndRedactSecrets(val);
+    updateSecretAlert(hasSecrets);
+}
+
+function handleLogInput() {
+    const el = document.getElementById('logIngestionInput');
+    if (!el) return;
+    const val = el.value || '';
+    const { hasSecrets } = detectAndRedactSecrets(val);
+    updateSecretAlert(hasSecrets);
+}
+
+function handleEnvConfigInput() {
+    const el = document.getElementById('envConfigInput');
+    if (!el) return;
+    const val = el.value || '';
+    const { hasSecrets, redactedText } = detectAndRedactSecrets(val);
+    if (hasSecrets) {
+        el.value = redactedText; // Auto-redact secrets in field
+    }
+    updateSecretAlert(hasSecrets);
+}
+
+function saveProjectMeta() {
+    const proj = document.getElementById('metaProjectName')?.value || '';
+    const stack = document.getElementById('metaTechStack')?.value || '';
+    const env = document.getElementById('metaTargetEnv')?.value || '';
+    localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ proj, stack, env }));
+}
+
+function loadProjectMeta() {
+    try {
+        const meta = JSON.parse(localStorage.getItem(PROJECT_META_KEY) || '{}');
+        if (meta.proj && document.getElementById('metaProjectName')) document.getElementById('metaProjectName').value = meta.proj;
+        if (meta.stack && document.getElementById('metaTechStack')) document.getElementById('metaTechStack').value = meta.stack;
+        if (meta.env && document.getElementById('metaTargetEnv')) document.getElementById('metaTargetEnv').value = meta.env;
+    } catch (_) {}
+}
+
+function removeArtifactChip(id) {
+    ingestedArtifacts = ingestedArtifacts.filter(a => a.id !== id);
+    renderArtifactChips();
+}
+
+function clearIngestionContext() {
+    ingestedArtifacts = [];
+    if (document.getElementById('scratchpadInput')) document.getElementById('scratchpadInput').value = '';
+    if (document.getElementById('logIngestionInput')) document.getElementById('logIngestionInput').value = '';
+    if (document.getElementById('envConfigInput')) document.getElementById('envConfigInput').value = '';
+    renderArtifactChips();
+    updateSecretAlert(false);
+}
+
+function renderArtifactChips() {
+    const container = document.getElementById('artifactsChipsContainer');
+    const badge = document.getElementById('activeContextCount');
+    if (!container) return;
+
+    const count = ingestedArtifacts.length;
+    if (badge) badge.textContent = `${count} item${count === 1 ? '' : 's'} attached`;
+
+    if (!count) {
+        container.innerHTML = '<span class="text-secondary fs-8 italic opacity-75">No context items attached. Drag files or paste notes above.</span>';
+        return;
+    }
+
+    container.innerHTML = '';
+    ingestedArtifacts.forEach(item => {
+        const chip = document.createElement('span');
+        chip.className = 'artifact-chip';
+        chip.innerHTML = `<i class="fa-solid fa-file-code"></i> ${escapeHtml(item.name)} <i class="fa-solid fa-xmark remove-chip" onclick="removeArtifactChip('${item.id}')" title="Remove context"></i>`;
+        container.appendChild(chip);
+    });
+}
+
+function assembleAttachedContextPayload() {
+    const parts = [];
+
+    // Project Metadata
+    const proj = document.getElementById('metaProjectName')?.value.trim();
+    const stack = document.getElementById('metaTechStack')?.value.trim();
+    const env = document.getElementById('metaTargetEnv')?.value.trim();
+    if (proj || stack || env) {
+        parts.push(`[PROJECT METADATA]\nProject: ${proj || 'N/A'} | Tech Stack: ${stack || 'N/A'} | Target Env: ${env || 'N/A'}`);
+    }
+
+    // Ingested Files
+    ingestedArtifacts.forEach(file => {
+        const { redactedText } = detectAndRedactSecrets(file.content);
+        parts.push(`[ATTACHED FILE: ${file.name}]\n\`\`\`\n${redactedText}\n\`\`\``);
+    });
+
+    // Scratchpad Notes
+    const scratch = document.getElementById('scratchpadInput')?.value.trim();
+    if (scratch) {
+        const { redactedText } = detectAndRedactSecrets(scratch);
+        parts.push(`[TECHNICAL SCRATCHPAD NOTES]\n${redactedText}`);
+    }
+
+    // Log / Stacktrace
+    const logs = document.getElementById('logIngestionInput')?.value.trim();
+    if (logs) {
+        const { redactedText } = detectAndRedactSecrets(logs);
+        parts.push(`[LOG / STACKTRACE CONTEXT]\n\`\`\`\n${redactedText}\n\`\`\``);
+    }
+
+    // Environment & Configuration
+    const envConf = document.getElementById('envConfigInput')?.value.trim();
+    if (envConf) {
+        const { redactedText } = detectAndRedactSecrets(envConf);
+        parts.push(`[ENVIRONMENT / CONFIG CONTEXT]\n\`\`\`\n${redactedText}\n\`\`\``);
+    }
+
+    return parts.length ? parts.join('\n\n') + '\n\n' : '';
+}
+
+function triggerQuickCommand(commandName) {
+    const promptInput = document.getElementById('promptInput');
+    if (!promptInput || uiState === 'connecting' || uiState === 'generating') return;
+
+    const contextPrefix = assembleAttachedContextPayload();
+    let promptText = '';
+
+    switch (commandName) {
+        case 'Explain Architecture':
+            promptText = 'Please provide a detailed architecture breakdown and structural analysis based on the attached technical context.';
+            break;
+        case 'Debug Stacktrace':
+            promptText = 'Please analyze the attached stack traces/logs, identify the root cause of failure, and provide exact code fixes.';
+            break;
+        case 'Refactor Code':
+            promptText = 'Review the attached code for refactoring opportunities focusing on performance, maintainability, and clean architecture.';
+            break;
+        case 'Security Audit':
+            promptText = 'Perform a security audit on the attached technical context, checking for vulnerabilities, sanitization issues, and flaws.';
+            break;
+        case 'Generate Tests':
+            promptText = 'Generate a comprehensive unit and integration test suite with high edge-case coverage for the attached code.';
+            break;
+        default:
+            promptText = `Execute technical action: ${commandName}`;
+            break;
+    }
+
+    promptInput.value = promptText;
+    resizeComposer();
+    document.getElementById('chatForm')?.requestSubmit();
+}
+
+// ---------------------------------------------------------------------------
+// Markdown & Syntax Highlighting (Req 8, 9)
+// ---------------------------------------------------------------------------
+
+function safeMarkdown(text) {
+    return DOMPurify.sanitize(marked.parse(text || '', { breaks: true, gfm: true }), { USE_PROFILES: { html: true } });
+}
+
+function renderMarkdown(text) {
+    if (!text) return '';
+    const el = document.createElement('div');
+    el.innerHTML = safeMarkdown(text);
+    el.querySelectorAll('pre code').forEach(x => {
+        try { hljs.highlightElement(x); } catch (_) {}
+    });
+    addCopyButtons(el);
+    return el.innerHTML;
+}
+
+function addCopyButtons(container) {
+    container.querySelectorAll('pre').forEach(pre => {
+        if (pre.querySelector('.copy-btn')) return;
+        const code = pre.querySelector('code');
+        const lang = (code?.className.match(/language-([\w-]+)/) || [])[1];
+        const bar = document.createElement('div');
+        bar.className = 'code-toolbar';
+
+        if (lang) {
+            const label = document.createElement('span');
+            label.className = 'code-language';
+            label.textContent = lang;
+            bar.appendChild(label);
+        }
+
+        const b = document.createElement('button');
+        b.className = 'copy-btn';
+        b.type = 'button';
+        b.innerHTML = '<i class="fa-regular fa-copy"></i> Copy';
+        b.setAttribute('aria-label', 'Copy code snippet');
+        b.onclick = async () => {
+            const codeText = code ? code.innerText : pre.innerText;
+            const success = await copyText(codeText);
+            if (success) {
+                b.innerHTML = '<i class="fa-solid fa-check text-success"></i> Copied!';
+                setTimeout(() => b.innerHTML = '<i class="fa-regular fa-copy"></i> Copy', 1800);
+            } else {
+                b.textContent = 'Copy failed';
+            }
+        };
+
+        bar.appendChild(b);
+        pre.prepend(bar);
+    });
+}
+
+async function copyText(text) {
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (_) {}
+
+    // Fallback using temporary textarea
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const success = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return success;
+    } catch (_) {
+        return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chat Rendering & Helper Functions
+// ---------------------------------------------------------------------------
+
+function scrollToBottom(force = false) {
+    const c = document.getElementById('messagesContainer');
+    if (c && (force || shouldStickToBottom)) c.scrollTop = c.scrollHeight;
+}
+
+function checkScrollPosition() {
+    const c = document.getElementById('messagesContainer');
+    if (c) shouldStickToBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 100;
+}
+
+function resizeComposer() {
+    const x = document.getElementById('promptInput');
+    if (x) {
+        x.style.height = 'auto';
+        x.style.height = `${Math.min(x.scrollHeight, 160)}px`;
+    }
+}
+
+function checkEnter(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById('chatForm')?.requestSubmit();
+    }
+}
+
+function closeSidebar() {
+    document.getElementById('appWrapper')?.classList.remove('sidebar-visible');
+}
+
+function openSidebar() {
+    document.getElementById('appWrapper')?.classList.add('sidebar-visible');
+}
+
+function openModal(id) {
+    const m = document.getElementById(id);
+    if (m) {
+        m.hidden = false;
+        m.querySelector('button,select,input')?.focus();
+    }
+}
+
+function closeModals() {
+    document.querySelectorAll('.modal-shell').forEach(x => x.hidden = true);
+}
+
+function applySettings(s) {
+    document.body.classList.toggle('light-theme', s.theme === 'light');
+    document.body.dataset.font = s.font;
+    document.body.dataset.density = s.density;
+    const icon = document.querySelector('#themeToggle i');
+    if (icon) {
+        icon.classList.toggle('fa-sun', s.theme !== 'light');
+        icon.classList.toggle('fa-moon', s.theme === 'light');
+    }
+    const map = { themeSetting: s.theme, fontSetting: s.font, densitySetting: s.density, timestampsSetting: s.timestamps };
+    Object.entries(map).forEach(([id, v]) => {
+        const e = document.getElementById(id);
+        if (e) e[e.type === 'checkbox' ? 'checked' : 'value'] = v;
+    });
+}
+
+function toggleTheme() {
+    const s = getSettings();
+    s.theme = s.theme === 'light' ? 'dark' : 'light';
+    saveSettings(s);
+}
+
+function renderConversationList() {
+    const list = document.getElementById('threadsItems');
+    const empty = document.getElementById('threadsEmpty');
+    const q = (document.getElementById('conversationSearch')?.value || '').toLowerCase();
+    if (!list) return;
+    list.innerHTML = '';
+    const items = getConversations().filter(c => (c.title || '').toLowerCase().includes(q)).sort((a, b) => b.updatedAt - a.updatedAt);
+    document.getElementById('threadCount').textContent = items.length;
+    if (empty) empty.hidden = items.length > 0;
+
+    items.forEach(c => {
+        const item = document.createElement('div');
+        item.className = `thread-item ${c.id === activeConversationId ? 'active' : ''}`;
+        item.tabIndex = 0;
+        item.setAttribute('role', 'button');
+
+        const t = document.createElement('span');
+        t.className = 'thread-title';
+        t.textContent = c.title || 'Technical Session';
+
+        const actions = document.createElement('span');
+        actions.className = 'thread-actions';
+        const r = actionButton('Rename session', 'fa-pen', e => { e.stopPropagation(); renameConversation(c.id); });
+        const d = actionButton('Delete session', 'fa-trash', e => { e.stopPropagation(); deleteConversation(c.id); });
+        r.className = 'thread-action';
+        d.className = 'thread-action danger';
+        actions.append(r, d);
+
+        item.append(t, actions);
+        item.onclick = () => selectConversation(c.id);
+        item.onkeydown = e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                selectConversation(c.id);
+            }
+        };
+        list.appendChild(item);
+    });
+}
+
+function selectConversation(id) {
+    if (uiState === 'connecting' || uiState === 'generating') return;
+    activeConversationId = id;
+    chatHistory = activeConversation()?.messages || getConversations().find(x => x.id === id)?.messages || [];
+    renderMessages();
+    renderConversationList();
+    closeSidebar();
+}
+
+function startNewChat() {
+    if (uiState === 'connecting' || uiState === 'generating') stopGeneration();
+    activeConversationId = null;
+    chatHistory = [];
+    renderMessages();
+    renderConversationList();
+    document.getElementById('promptInput')?.focus();
+    closeSidebar();
+}
+
+function renameConversation(id) {
+    const all = getConversations();
+    const c = all.find(x => x.id === id);
+    if (!c) return;
+    const name = window.prompt('Session name', c.title);
+    if (name?.trim()) {
+        c.title = name.trim().slice(0, 80);
+        c.updatedAt = Date.now();
+        saveConversations(all);
+    }
+}
+
+function deleteConversation(id) {
+    const c = getConversations().find(x => x.id === id);
+    if (!c || !window.confirm(`Delete “${c.title}”?`)) return;
+    saveConversations(getConversations().filter(x => x.id !== id));
+    if (id === activeConversationId) startNewChat();
+    else renderConversationList();
+}
+
+function clearCurrentConversation() {
+    if (!chatHistory.length) return;
+    if (window.confirm('Clear this technical session? All session history will be reset.')) {
+        saveConversations(getConversations().filter(x => x.id !== activeConversationId));
+        startNewChat();
+    }
+}
+
+function actionButton(label, icon, fn) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'message-action';
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+    b.onclick = fn;
+    return b;
+}
+
+function messageElement(m, index) {
+    const w = document.createElement('div');
+    w.className = `msg-wrapper ${m.role === 'user' ? 'user' : 'ai'}`;
+    w.dataset.index = index;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
+
+    const content = document.createElement('div');
+    content.className = 'msg-content';
+    content.innerHTML = renderMarkdown(m.content);
+    bubble.appendChild(content);
+
+    const footer = document.createElement('div');
+    footer.className = 'message-footer';
+
+    if (getSettings().timestamps && m.time) {
+        const time = document.createElement('time');
+        time.textContent = m.time;
+        footer.appendChild(time);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+
+    if (m.role === 'user') {
+        actions.appendChild(actionButton('Edit message', 'fa-pen', () => editUserMessage(index)));
+    } else {
+        const copyBtn = actionButton('Copy response', 'fa-copy', async (e) => {
+            const btn = e.currentTarget;
+            const success = await copyText(m.content);
+            if (success) {
+                btn.innerHTML = '<i class="fa-solid fa-check text-success"></i>';
+                setTimeout(() => btn.innerHTML = '<i class="fa-solid fa-copy"></i>', 1600);
+            }
+        });
+        actions.append(copyBtn, actionButton('Retry response', 'fa-rotate-right', () => regenerate(index)));
+    }
+
+    footer.appendChild(actions);
+    bubble.appendChild(footer);
+
+    w.innerHTML = `<div class="avatar"><i class="fa-solid fa-${m.role === 'user' ? 'user' : 'brain'}"></i></div>`;
+    w.appendChild(bubble);
+    return w;
+}
+
+function emptyHeroState() {
+    const d = document.createElement('div');
+    d.className = 'hero-state';
+    d.id = 'heroWelcomeState';
+    d.innerHTML = `
+        <div class="hero-icon"><i class="fa-solid fa-terminal"></i></div>
+        <p class="eyebrow">JARVIS WORKBENCH // STATELESS INFERENCE</p>
+        <h2 class="fw-bold mb-2">Technical AI Engineering Environment</h2>
+        <p class="text-secondary mb-3">Attach code, paste stack traces, configure context above, or ask any technical prompt.</p>
+    `;
+    return d;
+}
+
+function renderMessages() {
+    const c = document.getElementById('messagesContainer');
+    if (!c) return;
+    c.innerHTML = '';
+    if (!chatHistory.length) {
+        c.appendChild(emptyHeroState());
+        return;
+    }
+    chatHistory.forEach((m, i) => c.appendChild(messageElement(m, i)));
+    scrollToBottom(true);
+}
+
+function ensureActiveConversation() {
+    if (activeConversationId) return;
+    const c = makeConversation();
+    activeConversationId = c.id;
+    saveConversations([c, ...getConversations()]);
+}
+
+// ---------------------------------------------------------------------------
+// Stop & Retry Generation Functions (Req 3, 4)
+// ---------------------------------------------------------------------------
+
+function stopGeneration() {
+    if (activeController) {
+        activeController.abort();
+        activeController = null;
+    }
+    const aiBubble = document.getElementById('aiTypingBubble');
+    if (aiBubble) {
+        const content = aiBubble.querySelector('.msg-content');
+        if (content && content.innerText.trim()) {
+            // Keep partial text
+            const partialText = content.innerText.trim();
+            chatHistory.push({
+                role: 'assistant',
+                content: partialText + ' *(Generation stopped by user)*',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
+            syncActiveConversation();
+        }
+        aiBubble.remove();
+    }
+    setUIState('idle');
+}
+
+function editUserMessage(i) {
+    if (uiState === 'connecting' || uiState === 'generating' || !chatHistory[i] || chatHistory[i].role !== 'user') return;
+    const input = document.getElementById('promptInput');
+    if (input) {
+        input.value = chatHistory[i].content;
+        chatHistory = chatHistory.slice(0, i);
+        syncActiveConversation();
+        renderMessages();
+        resizeComposer();
+        input.focus();
+    }
+}
+
+function regenerate(i) {
+    if (uiState === 'connecting' || uiState === 'generating' || i < 1 || chatHistory[i].role !== 'assistant') return;
+    const promptMsg = chatHistory[i - 1];
+    if (!promptMsg || promptMsg.role !== 'user') return;
+    chatHistory = chatHistory.slice(0, i - 1);
+    renderMessages();
+    sendPrompt(promptMsg.content, false);
+}
+
+// ---------------------------------------------------------------------------
+// Main Prompt Dispatch & SSE Parsing (Req 1, 10, 17, 18)
+// ---------------------------------------------------------------------------
+
+async function handleSend(e) {
+    if (e) e.preventDefault();
+    if (uiState === 'connecting' || uiState === 'generating') return;
+
+    const input = document.getElementById('promptInput');
+    const rawPrompt = input?.value.trim() || '';
+
+    const attachedContext = assembleAttachedContextPayload();
+    const fullPrompt = (attachedContext + rawPrompt).trim();
+
+    if (!fullPrompt) return;
+    if (fullPrompt.length > MAX_MESSAGE_CHARS) {
+        window.alert(`Please keep messages under ${MAX_MESSAGE_CHARS} characters.`);
+        return;
+    }
+
+    input.value = '';
+    resizeComposer();
+    sendPrompt(fullPrompt, true);
+}
+
+async function sendPrompt(prompt, isNewSubmission = true) {
+    ensureActiveConversation();
+    setUIState('connecting', 'Connecting to Jarvis...');
+
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+    const requestId = crypto.randomUUID();
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (isNewSubmission) {
+        chatHistory.push({ role: 'user', content: prompt, time: timestamp });
+        renderMessages();
+    }
+
+    const aiBubble = document.createElement('div');
+    aiBubble.className = 'msg-wrapper ai';
+    aiBubble.id = 'aiTypingBubble';
+    aiBubble.innerHTML = `
+        <div class="avatar"><i class="fa-solid fa-brain"></i></div>
+        <div class="msg-bubble">
+            <div class="msg-content">
+                <div class="typing-indicator" aria-label="Jarvis is generating">
+                    <span></span><span></span><span></span><em>Initializing model connection...</em>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('messagesContainer')?.appendChild(aiBubble);
+    scrollToBottom(true);
+
+    activeController = new AbortController();
+    let accumulatedText = '';
+
+    try {
+        const response = await fetch('/api/chat/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrf,
+                'X-Request-ID': requestId,
+            },
+            body: JSON.stringify({
+                message: prompt,
+                history: chatHistory.slice(-MAX_HISTORY_TURNS),
+                request_id: requestId,
+                stream: true
+            }),
+            signal: activeController.signal
+        });
+
+        if (!response.ok) {
+            let errText = `Server returned HTTP ${response.status}`;
+            try {
+                const errJson = await response.json();
+                if (errJson.error) errText = errJson.error;
+            } catch (_) {}
+            throw new Error(errText);
+        }
+
+        setUIState('generating', 'Generating response...');
+        const contentEl = aiBubble.querySelector('.msg-content');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete trailing chunk
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('data: ')) {
+                    try {
+                        const event = JSON.parse(trimmed.slice(6));
+                        if (event.type === 'chunk') {
+                            accumulatedText += event.delta;
+                            if (contentEl) contentEl.innerHTML = renderMarkdown(accumulatedText);
+                            scrollToBottom();
+                        } else if (event.type === 'error') {
+                            throw new Error(event.error || 'AI service failure occurred.');
+                        }
+                    } catch (parseErr) {
+                        if (trimmed.includes('"type": "error"')) {
+                            throw parseErr;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (accumulatedText) {
+            chatHistory.push({ role: 'assistant', content: accumulatedText, time: timestamp });
+            chatHistory = chatHistory.slice(-MAX_HISTORY_TURNS);
+            syncActiveConversation();
+        }
+
+        aiBubble.remove();
+        renderMessages();
+        setUIState('completed');
+
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            setUIState('idle');
+            return;
+        }
+
+        setUIState('error', 'Request Failed');
+        if (aiBubble && aiBubble.querySelector('.msg-content')) {
+            aiBubble.querySelector('.msg-content').innerHTML = `
+                <div class="error-state">
+                    <i class="fa-solid fa-triangle-exclamation text-danger fs-5 me-2"></i>
+                    <span>${escapeHtml(err.message || 'Connection interrupted.')}</span>
+                </div>
+            `;
+        }
+    } finally {
+        activeController = null;
+        if (uiState !== 'error') {
+            setTimeout(() => { if (uiState === 'completed') setUIState('idle'); }, 2000);
+        }
+    }
+}
+
+function escapeHtml(text) {
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------------------------------------------------------------------------
+// Conversation Export as Markdown & JSON (Req 6)
+// ---------------------------------------------------------------------------
+
+function downloadChat(format = 'markdown') {
+    const session = activeConversation();
+    const title = session?.title || 'Jarvis-Session';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+    if (format === 'json') {
+        const jsonBlob = new Blob([JSON.stringify({
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            title,
+            messages: chatHistory
+        }, null, 2)], { type: 'application/json' });
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(jsonBlob);
+        a.download = `jarvis-session-${timestamp}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    } else {
+        // Markdown Export
+        let md = `# ${title}\n\n*Exported on ${new Date().toLocaleString()}*\n\n---\n\n`;
+        chatHistory.forEach(m => {
+            const roleName = m.role === 'user' ? '👤 **User**' : '🤖 **Jarvis AI**';
+            md += `${roleName} *(${m.time || ''})*\n\n${m.content}\n\n---\n\n`;
+        });
+
+        const mdBlob = new Blob([md], { type: 'text/markdown' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(mdBlob);
+        a.download = `jarvis-session-${timestamp}.md`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    closeModals();
+}
+
+function importChat(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            const data = JSON.parse(reader.result);
+            const messages = Array.isArray(data) ? data : data.messages;
+            if (!Array.isArray(messages) || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string')) {
+                throw new Error();
+            }
+            const c = makeConversation(messages.map(m => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_CHARS) })));
+            saveConversations([c, ...getConversations()]);
+            activeConversationId = c.id;
+            chatHistory = c.messages;
+            renderMessages();
+            renderConversationList();
+        } catch (_) {
+            window.alert('Selected file is not a valid Jarvis session export.');
+        }
+        event.target.value = '';
+    };
+    reader.readAsText(file);
+}
+
+// ---------------------------------------------------------------------------
+// Initialization & Event Listeners
+// ---------------------------------------------------------------------------
+
+document.addEventListener('DOMContentLoaded', () => {
+    marked.setOptions({ headerIds: false, mangle: false });
+    applySettings(getSettings());
+    initSidebarResizer();
+    loadProjectMeta();
+
+    // Setup drag and drop for context zone
+    const dragArea = document.getElementById('dragDropArea');
+    if (dragArea) {
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dragArea.addEventListener(eventName, e => {
+                e.preventDefault();
+                dragArea.classList.add('drag-over');
+            });
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dragArea.addEventListener(eventName, e => {
+                e.preventDefault();
+                dragArea.classList.remove('drag-over');
+            });
+        });
+        dragArea.addEventListener('drop', e => {
+            const dt = e.dataTransfer;
+            if (dt && dt.files && dt.files.length) {
+                handleFileIngestion({ target: { files: dt.files } });
+            }
+        });
+    }
+
+    const list = getConversations();
+    if (list.length) {
+        activeConversationId = list[0].id;
+        chatHistory = list[0].messages || [];
+    }
+
+    renderMessages();
+    renderConversationList();
+
+    document.getElementById('messagesContainer')?.addEventListener('scroll', checkScrollPosition);
+    document.getElementById('promptInput')?.addEventListener('input', resizeComposer);
+    document.getElementById('conversationSearch')?.addEventListener('input', renderConversationList);
+
+    document.getElementById('sidebarOpen')?.addEventListener('click', openSidebar);
+    document.getElementById('sidebarClose')?.addEventListener('click', closeSidebar);
+    document.getElementById('sidebarBackdrop')?.addEventListener('click', closeSidebar);
+
+    document.getElementById('stopBtn')?.addEventListener('click', stopGeneration);
+    document.getElementById('clearChatBtn')?.addEventListener('click', clearCurrentConversation);
+    document.getElementById('settingsBtn')?.addEventListener('click', () => openModal('settingsModal'));
+    document.getElementById('shortcutsBtn')?.addEventListener('click', () => openModal('shortcutsModal'));
+
+    document.querySelectorAll('[data-close-modal]').forEach(b => b.addEventListener('click', closeModals));
+    document.querySelectorAll('.modal-shell').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModals(); }));
+
+    ['themeSetting', 'fontSetting', 'densitySetting', 'timestampsSetting'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => {
+            const s = getSettings();
+            s.theme = document.getElementById('themeSetting').value;
+            s.font = document.getElementById('fontSetting').value;
+            s.density = document.getElementById('densitySetting').value;
+            s.timestamps = document.getElementById('timestampsSetting').checked;
+            saveSettings(s);
+            renderMessages();
+        });
+    });
+
+    document.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            startNewChat();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+            e.preventDefault();
+            toggleIngestionZone();
+        }
+        if (e.key === 'Escape') {
+            closeModals();
+            closeSidebar();
+        }
+    });
+
+    resizeComposer();
+});

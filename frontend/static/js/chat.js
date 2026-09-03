@@ -230,31 +230,126 @@ function toggleIngestionZone() {
     if (zone) zone.classList.toggle('collapsed');
 }
 
-function handleFileIngestion(event) {
+async function extractPdfText(arrayBuffer) {
+    try {
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const textParts = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                const pageText = content.items.map(item => item.str).join(' ');
+                if (pageText.trim()) textParts.push(`--- Page ${i} ---\n${pageText.trim()}`);
+            }
+            return textParts.join('\n\n');
+        }
+    } catch (e) {
+        console.warn('PDF extraction fallback:', e);
+    }
+    return '';
+}
+
+async function extractDocxText(arrayBuffer) {
+    try {
+        if (window.JSZip) {
+            const zip = await window.JSZip.loadAsync(arrayBuffer);
+            const docXml = await zip.file("word/document.xml")?.async("text");
+            if (docXml) {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(docXml, "text/xml");
+                const paragraphs = Array.from(xmlDoc.getElementsByTagName("w:p"));
+                return paragraphs.map(p => p.textContent.trim()).filter(Boolean).join('\n');
+            }
+        }
+    } catch (e) {
+        console.warn('DOCX extraction fallback:', e);
+    }
+    return '';
+}
+
+async function extractPptxText(arrayBuffer) {
+    try {
+        if (window.JSZip) {
+            const zip = await window.JSZip.loadAsync(arrayBuffer);
+            const slideFiles = Object.keys(zip.files).filter(f => f.startsWith("ppt/slides/slide") && f.endsWith(".xml"));
+            slideFiles.sort((a, b) => {
+                const numA = parseInt((a.match(/\d+/) || [0])[0], 10);
+                const numB = parseInt((b.match(/\d+/) || [0])[0], 10);
+                return numA - numB;
+            });
+
+            const slideTexts = [];
+            for (let i = 0; i < slideFiles.length; i++) {
+                const xmlText = await zip.file(slideFiles[i]).async("text");
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+                const textNodes = Array.from(xmlDoc.getElementsByTagName("a:t"));
+                const text = textNodes.map(node => node.textContent.trim()).filter(Boolean).join(' ');
+                if (text) {
+                    slideTexts.push(`--- Slide ${i + 1} ---\n${text}`);
+                }
+            }
+            return slideTexts.join('\n\n');
+        }
+    } catch (e) {
+        console.warn('PPTX extraction fallback:', e);
+    }
+    return '';
+}
+
+async function parseFileContent(file) {
+    const fileName = file.name.toLowerCase();
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+
+        if (fileName.endsWith('.pdf')) {
+            reader.onload = async (e) => {
+                const text = await extractPdfText(e.target.result);
+                resolve(text || `[PDF File attached: ${file.name} (${file.size} bytes)]`);
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
+            reader.onload = async (e) => {
+                const text = await extractDocxText(e.target.result);
+                resolve(text || `[DOCX Document attached: ${file.name} (${file.size} bytes)]`);
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (fileName.endsWith('.pptx') || fileName.endsWith('.ppt')) {
+            reader.onload = async (e) => {
+                const text = await extractPptxText(e.target.result);
+                resolve(text || `[PPTX Presentation attached: ${file.name} (${file.size} bytes)]`);
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.onload = (e) => {
+                resolve(e.target.result || '');
+            };
+            reader.readAsText(file);
+        }
+    });
+}
+
+async function handleFileIngestion(event) {
     const files = event.target.files;
     if (!files || !files.length) return;
 
     let foundSecrets = false;
-    Array.from(files).forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const rawContent = e.target.result || '';
-            const { hasSecrets, redactedText } = detectAndRedactSecrets(rawContent);
-            if (hasSecrets) foundSecrets = true;
+    for (const file of Array.from(files)) {
+        const rawContent = await parseFileContent(file);
+        const { hasSecrets, redactedText } = detectAndRedactSecrets(rawContent);
+        if (hasSecrets) foundSecrets = true;
 
-            ingestedArtifacts.push({
-                id: crypto.randomUUID(),
-                name: file.name,
-                type: 'file',
-                content: redactedText
-            });
+        ingestedArtifacts.push({
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: 'file',
+            content: redactedText
+        });
+    }
 
-            renderArtifactChips();
-            updateSecretAlert(foundSecrets);
-        };
-        reader.readAsText(file);
-    });
-
+    renderArtifactChips();
+    updateSecretAlert(foundSecrets);
     event.target.value = '';
 }
 
@@ -330,12 +425,19 @@ function renderArtifactChips() {
 
     container.innerHTML = '';
     ingestedArtifacts.forEach(item => {
+        const ext = item.name.split('.').pop().toLowerCase();
+        let iconClass = 'fa-file-code text-success';
+        if (ext === 'pdf') iconClass = 'fa-file-pdf text-danger';
+        else if (ext === 'pptx' || ext === 'ppt') iconClass = 'fa-file-powerpoint text-warning';
+        else if (ext === 'docx' || ext === 'doc') iconClass = 'fa-file-word text-info';
+
         const chip = document.createElement('span');
         chip.className = 'artifact-chip';
-        chip.innerHTML = `<i class="fa-solid fa-file-code"></i> ${escapeHtml(item.name)} <i class="fa-solid fa-xmark remove-chip" onclick="removeArtifactChip('${item.id}')" title="Remove context"></i>`;
+        chip.innerHTML = `<i class="fa-solid ${iconClass}"></i> ${escapeHtml(item.name)} <i class="fa-solid fa-xmark remove-chip" onclick="removeArtifactChip('${item.id}')" title="Remove context"></i>`;
         container.appendChild(chip);
     });
 }
+
 
 function assembleAttachedContextPayload() {
     const parts = [];

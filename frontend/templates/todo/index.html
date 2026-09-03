@@ -81,7 +81,7 @@
                         <span class="status-indicator-text" id="statusIndicatorText">Ready</span>
                     </div>
 
-                    <button type="button" class="btn-tool ms-1" onclick="toggleIngestionZone()" title="Toggle Context Ingestion Zone (Ctrl+I)"><i class="fa-solid fa-boxes-stacked text-success me-1"></i> Context Zone</button>
+                    <button type="button" class="btn-tool ms-1" onclick="toggleFileZone()" title="Toggle File Zone (Ctrl+I)"><i class="fa-solid fa-file text-success me-1"></i> File Zone</button>
                     <button type="button" class="theme-toggle ms-1" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme"><i class="fa-solid fa-sun"></i></button>
 
                     <button type="button" class="icon-btn" id="clearChatBtn" aria-label="Clear session" title="Clear current session"><i class="fa-solid fa-broom"></i></button>
@@ -95,21 +95,21 @@
                 </div>
             </header>
 
-            <!-- Persistent Technical Context Ingestion Zone -->
-            <section class="ingestion-zone collapsed" id="ingestionZone" aria-label="Context Ingestion Zone">
-                <div class="ingestion-header" onclick="toggleIngestionZone()">
+            <!-- Persistent File Zone -->
+            <section class="file-zone collapsed" id="fileZone" aria-label="File Zone">
+                <div class="file-zone-header" onclick="toggleFileZone()">
                     <div class="d-flex align-items-center gap-2">
-                        <i class="fa-solid fa-boxes-stacked text-success"></i>
-                        <span class="fw-semibold">Context Ingestion Zone</span>
+                        <i class="fa-solid fa-file text-success"></i>
+                        <span class="fw-semibold">File Zone</span>
                         <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-0 fs-8 ms-1" id="activeContextCount">0 items attached</span>
                     </div>
                     <div class="d-flex align-items-center gap-2">
-                        <button type="button" class="btn-tool btn-sm" onclick="event.stopPropagation(); clearIngestionContext();" title="Clear attached context"><i class="fa-solid fa-eraser me-1"></i> Clear</button>
-                        <i class="fa-solid fa-chevron-down ingestion-toggle-icon" id="ingestionToggleIcon"></i>
+                        <button type="button" class="btn-tool btn-sm" onclick="event.stopPropagation(); clearAttachedContext();" title="Clear attached files and notes"><i class="fa-solid fa-eraser me-1"></i> Clear</button>
+                        <i class="fa-solid fa-chevron-down file-zone-toggle-icon" id="fileZoneToggleIcon"></i>
                     </div>
                 </div>
 
-                <div class="ingestion-body" id="ingestionBody">
+                <div class="file-zone-body" id="fileZoneBody">
                     <!-- Secret Detection Security Alert Banner -->
                     <div class="secret-alert-banner d-none" id="secretAlertBanner" role="alert">
                         <i class="fa-solid fa-triangle-exclamation text-warning me-2 fs-6"></i>
@@ -144,46 +144,29 @@
                     <!-- Context Panels Grid -->
                     <div class="row g-3">
                         <!-- Drag & Drop File Zone -->
-                        <div class="col-md-6 col-lg-3">
-                            <div class="ingestion-card drag-drop-area" id="dragDropArea" onclick="document.getElementById('fileContextInput').click()">
-                                <i class="fa-solid fa-file-contract fa-2x text-success mb-2"></i>
-                                <span class="fw-semibold d-block fs-7 mb-1">Drag &amp; Drop Files / Code / Docs</span>
+                        <div class="col-md-6 col-lg-6">
+                            <div class="file-card drag-drop-area" id="dragDropArea" onclick="document.getElementById('fileContextInput').click()">
+                                <i class="fa-solid fa-file fa-2x text-success mb-2"></i>
+                                <span class="fw-semibold d-block fs-7 mb-1">Drag &amp; Drop Files</span>
                                 <small class="text-secondary d-block fs-8">Supports Code, PDF, PPTX, DOCX, TXT, Logs</small>
-                                <input type="file" id="fileContextInput" multiple accept=".py,.js,.json,.md,.txt,.log,.pdf,.pptx,.docx,.doc,.csv,.xml,.html" hidden onchange="handleFileIngestion(event)">
+                                <input type="file" id="fileContextInput" multiple accept=".py,.js,.json,.md,.txt,.log,.pdf,.pptx,.docx,.doc,.csv,.xml,.html" hidden onchange="handleFilesAttached(event)">
                             </div>
                         </div>
 
-
-                        <!-- Technical Scratchpad -->
-                        <div class="col-md-6 col-lg-3">
-                            <div class="ingestion-card">
-                                <label for="scratchpadInput" class="ingestion-card-label"><i class="fa-solid fa-note-sticky text-warning me-1"></i> Technical Scratchpad</label>
-                                <textarea id="scratchpadInput" class="form-control form-control-sm ingestion-textarea font-monospace" placeholder="Paste notes, requirements, or architecture notes..." oninput="handleScratchpadInput()"></textarea>
-                            </div>
-                        </div>
-
-                        <!-- Log & Stacktrace Ingestion -->
-                        <div class="col-md-6 col-lg-3">
-                            <div class="ingestion-card">
-                                <label for="logIngestionInput" class="ingestion-card-label"><i class="fa-solid fa-bug text-danger me-1"></i> Log / Stacktrace Input</label>
-                                <textarea id="logIngestionInput" class="form-control form-control-sm ingestion-textarea font-monospace" placeholder="Paste stack traces or server logs here..." oninput="handleLogInput()"></textarea>
-                            </div>
-                        </div>
-
-                        <!-- Env & Config Context Input -->
-                        <div class="col-md-6 col-lg-3">
-                            <div class="ingestion-card">
-                                <label for="envConfigInput" class="ingestion-card-label"><i class="fa-solid fa-sliders text-info me-1"></i> Env / Config Context</label>
-                                <textarea id="envConfigInput" class="form-control form-control-sm ingestion-textarea font-monospace" placeholder="Paste env/config (Secrets automatically redacted)..." oninput="handleEnvConfigInput()"></textarea>
+                        <!-- Notes Area -->
+                        <div class="col-md-6 col-lg-6">
+                            <div class="file-card">
+                                <label for="notesInput" class="file-card-label"><i class="fa-solid fa-note-sticky text-warning me-1"></i> Notes</label>
+                                <textarea id="notesInput" class="form-control form-control-sm file-card-textarea font-monospace" placeholder="Paste notes, requirements, logs, or config here (secrets are auto-redacted)..." oninput="handleNotesInput()"></textarea>
                             </div>
                         </div>
                     </div>
 
                     <!-- Recent Artifacts & Active Context Chips -->
                     <div class="active-artifacts-row mt-3">
-                        <span class="fs-8 text-secondary fw-semibold text-uppercase me-2"><i class="fa-solid fa-paperclip me-1"></i> Attached Artifacts:</span>
+                        <span class="fs-8 text-secondary fw-semibold text-uppercase me-2"><i class="fa-solid fa-paperclip me-1"></i> Attached Files:</span>
                         <div class="artifacts-chips-container" id="artifactsChipsContainer">
-                            <span class="text-secondary fs-8 italic opacity-75">No context items attached. Drag files or paste notes above.</span>
+                            <span class="text-secondary fs-8 italic opacity-75">No files attached yet. Drop files or use the Notes area above.</span>
                         </div>
                     </div>
 
@@ -279,7 +262,7 @@
             </div>
             <div class="palette-commands-list" id="paletteCommandsList">
                 <div class="palette-item" onclick="executePaletteCommand('/new')"><kbd>/new</kbd> <span>Start a new technical session</span></div>
-                <div class="palette-item" onclick="executePaletteCommand('/context')"><kbd>/context</kbd> <span>Toggle slidable Context Ingestion Zone</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/context')"><kbd>/context</kbd> <span>Toggle slidable File Zone</span></div>
                 <div class="palette-item" onclick="executePaletteCommand('/tools')"><kbd>/tools</kbd> <span>Inspect controlled workspace tools</span></div>
                 <div class="palette-item" onclick="executePaletteCommand('/export')"><kbd>/export</kbd> <span>Export session as Markdown / JSON</span></div>
                 <div class="palette-item" onclick="executePaletteCommand('/clear')"><kbd>/clear</kbd> <span>Clear active session history</span></div>

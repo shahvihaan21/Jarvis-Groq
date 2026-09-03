@@ -813,8 +813,8 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     100% { opacity: 0.3; transform: scale(0.9); }
 }
 
-/* Persistent & Slidable Context Ingestion Zone */
-.ingestion-zone {
+/* Persistent & Slidable File Zone */
+.file-zone {
     background: var(--sidebar-bg);
     border-bottom: 1px solid var(--border-color);
     padding: 0.75rem 1.25rem;
@@ -822,38 +822,38 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     flex-shrink: 0;
     overflow: hidden;
 }
-.ingestion-body {
+.file-zone-body {
     max-height: 1200px;
     opacity: 1;
     overflow: hidden;
     transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease, margin-top 0.35s ease;
     margin-top: 0.75rem;
 }
-.ingestion-zone.collapsed {
+.file-zone.collapsed {
     padding-top: 0.55rem;
     padding-bottom: 0.55rem;
 }
-.ingestion-zone.collapsed .ingestion-body {
+.file-zone.collapsed .file-zone-body {
     display: block;
     max-height: 0;
     opacity: 0;
     margin-top: 0;
     pointer-events: none;
 }
-.ingestion-header {
+.file-zone-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     cursor: pointer;
     user-select: none;
 }
-.ingestion-header:hover {
+.file-zone-header:hover {
     color: var(--green-neon);
 }
-.ingestion-toggle-icon {
+.file-zone-toggle-icon {
     transition: transform 0.3s ease;
 }
-.ingestion-zone:not(.collapsed) .ingestion-toggle-icon {
+.file-zone:not(.collapsed) .file-zone-toggle-icon {
     transform: rotate(180deg);
 }
 
@@ -890,8 +890,8 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     background: rgba(16, 185, 129, 0.08);
 }
 
-/* Ingestion Cards & Textareas */
-.ingestion-card {
+/* File Cards & Textareas */
+.file-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 0.6rem;
@@ -900,7 +900,7 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     display: flex;
     flex-direction: column;
 }
-.ingestion-card-label {
+.file-card-label {
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--text-sub);
@@ -908,7 +908,7 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     display: flex;
     align-items: center;
 }
-.ingestion-textarea {
+.file-card-textarea {
     resize: none;
     height: 70px;
     font-size: 0.78rem;
@@ -917,7 +917,7 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     border: 1px solid var(--border-color);
     border-radius: 0.4rem;
 }
-.ingestion-textarea:focus {
+.file-card-textarea:focus {
     border-color: var(--green-neon);
     box-shadow: 0 0 0 2px rgba(0, 255, 135, 0.15);
     background: var(--bg-dark);

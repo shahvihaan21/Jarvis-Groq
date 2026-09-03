@@ -1,12 +1,12 @@
 // Jarvis AI Technical Workbench — Groq Provider Frontend Engine
-// State management, SSE resilience, resizable sidebar, and privacy-safe context ingestion.
+// State management, SSE resilience, resizable sidebar, and privacy-safe file attachment.
 
 let chatHistory = [];
 let activeConversationId = null;
 let uiState = 'idle'; // 'idle' | 'connecting' | 'generating' | 'completed' | 'error'
 let activeController = null;
 let shouldStickToBottom = true;
-let ingestedArtifacts = []; // Array of attached context items { id, name, type, content }
+let ingestedArtifacts = []; // Array of attached files { id, name, type, content }
 
 const MAX_HISTORY_TURNS = 12;
 const MAX_MESSAGE_CHARS = 8000;
@@ -222,20 +222,20 @@ function setUIState(newState, detailMessage = '') {
 }
 
 // ---------------------------------------------------------------------------
-const INGESTION_COLLAPSED_KEY = 'jarvisIngestionCollapsed';
+const FILE_ZONE_COLLAPSED_KEY = 'jarvisFileZoneCollapsed';
 
-function toggleIngestionZone() {
-    const zone = document.getElementById('ingestionZone');
+function toggleFileZone() {
+    const zone = document.getElementById('fileZone');
     if (zone) {
         const isCollapsed = zone.classList.toggle('collapsed');
-        localStorage.setItem(INGESTION_COLLAPSED_KEY, isCollapsed ? 'true' : 'false');
+        localStorage.setItem(FILE_ZONE_COLLAPSED_KEY, isCollapsed ? 'true' : 'false');
     }
 }
 
-function loadIngestionState() {
-    const zone = document.getElementById('ingestionZone');
+function loadFileZoneState() {
+    const zone = document.getElementById('fileZone');
     if (!zone) return;
-    const isCollapsed = localStorage.getItem(INGESTION_COLLAPSED_KEY);
+    const isCollapsed = localStorage.getItem(FILE_ZONE_COLLAPSED_KEY);
     if (isCollapsed === 'false') {
         zone.classList.remove('collapsed');
     } else if (isCollapsed === 'true') {
@@ -344,7 +344,7 @@ async function parseFileContent(file) {
     });
 }
 
-async function handleFileIngestion(event) {
+async function handleFilesAttached(event) {
     const files = event.target.files;
     if (!files || !files.length) return;
 
@@ -367,24 +367,8 @@ async function handleFileIngestion(event) {
     event.target.value = '';
 }
 
-function handleScratchpadInput() {
-    const el = document.getElementById('scratchpadInput');
-    if (!el) return;
-    const val = el.value || '';
-    const { hasSecrets } = detectAndRedactSecrets(val);
-    updateSecretAlert(hasSecrets);
-}
-
-function handleLogInput() {
-    const el = document.getElementById('logIngestionInput');
-    if (!el) return;
-    const val = el.value || '';
-    const { hasSecrets } = detectAndRedactSecrets(val);
-    updateSecretAlert(hasSecrets);
-}
-
-function handleEnvConfigInput() {
-    const el = document.getElementById('envConfigInput');
+function handleNotesInput() {
+    const el = document.getElementById('notesInput');
     if (!el) return;
     const val = el.value || '';
     const { hasSecrets, redactedText } = detectAndRedactSecrets(val);
@@ -415,11 +399,9 @@ function removeArtifactChip(id) {
     renderArtifactChips();
 }
 
-function clearIngestionContext() {
+function clearAttachedContext() {
     ingestedArtifacts = [];
-    if (document.getElementById('scratchpadInput')) document.getElementById('scratchpadInput').value = '';
-    if (document.getElementById('logIngestionInput')) document.getElementById('logIngestionInput').value = '';
-    if (document.getElementById('envConfigInput')) document.getElementById('envConfigInput').value = '';
+    if (document.getElementById('notesInput')) document.getElementById('notesInput').value = '';
     renderArtifactChips();
     updateSecretAlert(false);
 }
@@ -433,7 +415,7 @@ function renderArtifactChips() {
     if (badge) badge.textContent = `${count} item${count === 1 ? '' : 's'} attached`;
 
     if (!count) {
-        container.innerHTML = '<span class="text-secondary fs-8 italic opacity-75">No context items attached. Drag files or paste notes above.</span>';
+        container.innerHTML = '<span class="text-secondary fs-8 italic opacity-75">No files attached yet. Drop files or use the Notes area above.</span>';
         return;
     }
 
@@ -464,31 +446,17 @@ function assembleAttachedContextPayload() {
         parts.push(`[PROJECT METADATA]\nProject: ${proj || 'N/A'} | Tech Stack: ${stack || 'N/A'} | Target Env: ${env || 'N/A'}`);
     }
 
-    // Ingested Files
+    // Attached Files
     ingestedArtifacts.forEach(file => {
         const { redactedText } = detectAndRedactSecrets(file.content);
         parts.push(`[ATTACHED FILE: ${file.name}]\n\`\`\`\n${redactedText}\n\`\`\``);
     });
 
-    // Scratchpad Notes
-    const scratch = document.getElementById('scratchpadInput')?.value.trim();
-    if (scratch) {
-        const { redactedText } = detectAndRedactSecrets(scratch);
-        parts.push(`[TECHNICAL SCRATCHPAD NOTES]\n${redactedText}`);
-    }
-
-    // Log / Stacktrace
-    const logs = document.getElementById('logIngestionInput')?.value.trim();
-    if (logs) {
-        const { redactedText } = detectAndRedactSecrets(logs);
-        parts.push(`[LOG / STACKTRACE CONTEXT]\n\`\`\`\n${redactedText}\n\`\`\``);
-    }
-
-    // Environment & Configuration
-    const envConf = document.getElementById('envConfigInput')?.value.trim();
-    if (envConf) {
-        const { redactedText } = detectAndRedactSecrets(envConf);
-        parts.push(`[ENVIRONMENT / CONFIG CONTEXT]\n\`\`\`\n${redactedText}\n\`\`\``);
+    // Notes
+    const notes = document.getElementById('notesInput')?.value.trim();
+    if (notes) {
+        const { redactedText } = detectAndRedactSecrets(notes);
+        parts.push(`[NOTES]\n${redactedText}`);
     }
 
     return parts.length ? parts.join('\n\n') + '\n\n' : '';
@@ -1135,7 +1103,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applySettings(getSettings());
     initSidebarResizer();
     loadProjectMeta();
-    loadIngestionState();
+    loadFileZoneState();
 
 
     // Setup drag and drop for context zone
@@ -1156,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dragArea.addEventListener('drop', e => {
             const dt = e.dataTransfer;
             if (dt && dt.files && dt.files.length) {
-                handleFileIngestion({ target: { files: dt.files } });
+                handleFilesAttached({ target: { files: dt.files } });
             }
         });
     }
@@ -1205,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
             e.preventDefault();
-            toggleIngestionZone();
+            toggleFileZone();
         }
         if (e.key === 'Escape') {
             closeModals();
@@ -1250,7 +1218,7 @@ function executePaletteCommand(cmd) {
             startNewChat();
             break;
         case '/context':
-            toggleIngestionZone();
+            toggleFileZone();
             break;
         case '/tools':
             fetchToolsSummary();

@@ -22,7 +22,7 @@ project-root/
 ├── frontend/
 │   ├── static/
 │   │   ├── css/style.css      # Dark/light theme, resizable sidebar, command palette
-│   │   └── js/chat.js         # SSE engine, context ingestion, session persistence
+│   │   └── js/chat.js         # SSE engine, file attachment, session persistence
 │   └── templates/
 │       └── todo/
 │           ├── index.html     # Main workspace UI
@@ -84,18 +84,19 @@ Press `Ctrl+K` (or `Cmd+K`) to open the command palette:
 | Command | Action |
 |---|---|
 | `/new` | Start a new technical session |
-| `/context` | Toggle Context Ingestion Zone |
+| `/context` | Toggle File Zone |
 | `/tools` | Inspect available workspace tools |
 | `/export` | Export session as Markdown or JSON |
 | `/clear` | Clear active session history |
 | `/settings` | Workbench preferences |
 | `/status` | Check provider readiness |
 
-## Context Ingestion Zone
+## File Zone
 
-The slidable Context Ingestion Zone (`Ctrl+I`) supports:
+The slidable File Zone (`Ctrl+I`) supports:
 
-- **Drag & drop** code, text, logs, and configuration files
+- **Drag & drop** files (code, text, logs, and configuration)
+- **Notes area**: a single paste-anywhere scratchpad for notes, requirements, logs, or config
 - **Document parsing**: PDF (via `pdf.js`), PPTX and DOCX (via `JSZip`)
 - **Secret detection**: Auto-redacts API keys, tokens, passwords to `[REDACTED_SECRET]`
 - **Project metadata**: Name, tech stack, target environment

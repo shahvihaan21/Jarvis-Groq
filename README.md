@@ -1,25 +1,105 @@
-﻿# Jarvis AI — Stateless Groq-Powered Django Assistant
+# Jarvis AI — Production-Grade Stateless AI Platform
 
-A 100% stateless, database-free Django chat app. The browser owns the conversation
-history (JS array); Django is a thin SSE proxy that streams tokens from the
-**Groq API**. No database, no migrations, no server-side state — deploy anywhere.
+A 100% stateless, database-free Django AI assistant platform. The browser owns the conversation
+history (JS array); Django is a thin SSE proxy that streams tokens from
+**Groq**, **OpenRouter**, **Ollama**, or any **OpenAI-compatible** provider.
+No database, no migrations, no server-side state — deploy anywhere.
 
 ## Architecture
 
 ```
 project-root/
 ├── backend/
-│   ├── ai/            # Settings, URLs, WSGI
-│   └── todo/          # Stateless views + Groq SSE streaming
+│   ├── ai/                    # Settings, URLs, WSGI
+│   └── todo/
+│       ├── config.py          # Centralized configuration (timeouts, limits, system prompt)
+│       ├── provider.py        # SSE streaming orchestrator
+│       ├── provider_adapters.py  # Multi-provider abstraction (Groq, OpenAI-compatible, Ollama)
+│       ├── tools.py           # Controlled tool framework (calculator, repo search, file inspect)
+│       ├── views.py           # Thin stateless views + health + tools API
+│       ├── services.py        # Provider boundary compatibility layer
+│       └── utils.py           # Retry logic & request dedup
 ├── frontend/
-│   ├── static/        # CSS + JS (client-side chatHistory array)
-│   └── templates/     # HTML
+│   ├── static/
+│   │   ├── css/style.css      # Dark/light theme, resizable sidebar, command palette
+│   │   └── js/chat.js         # SSE engine, context ingestion, session persistence
+│   └── templates/
+│       └── todo/
+│           ├── index.html     # Main workspace UI
+│           └── test_frontend.html  # Browser-side test suite
+├── tests/
+│   ├── test_chat_api.py       # 12 API & streaming tests
+│   └── test_tools.py          # 9 tool & security boundary tests
+├── scripts/
+│   └── validate_env.py        # Pre-deployment environment validator
+├── .github/workflows/ci.yml   # GitHub Actions CI pipeline
 ├── .env.example
 ├── .gitignore
 ├── Procfile
 ├── requirements.txt
 └── runtime.txt
 ```
+
+## Multi-Provider System
+
+Jarvis supports configuration-driven provider selection via the `AI_PROVIDER` environment variable:
+
+| Provider | `AI_PROVIDER` | Required Env Vars |
+|---|---|---|
+| **Groq** (default) | `groq` | `GROQ_API_KEY` |
+| **OpenRouter** | `openrouter` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
+| **Ollama** (local) | `ollama` | None (defaults to `http://localhost:11434/v1`) |
+| **OpenAI** | `openai` | `OPENAI_API_KEY` |
+
+Provider adapters normalize all upstream errors into safe application categories (`timeout`, `rate_limit`, `authentication`, `validation`, `provider_failure`). Credentials are never exposed in logs, responses, or error messages.
+
+## SSE Streaming Protocol
+
+All streaming uses a standardized event protocol shared between backend and frontend:
+
+| Event | Description |
+|---|---|
+| `message_start` | Stream initialized with `request_id`, `model`, `provider`, `timestamp` |
+| `message_delta` | Incremental text chunk (`delta` field) |
+| `message_complete` | Stream finished with `duration_ms` and `token_count` |
+| `message_error` | Classified error with `category` and user-safe `error` message |
+
+## Controlled Tool Framework
+
+Safe, bounded workspace tools accessible via `/api/tools/`:
+
+| Tool | Description | Safety |
+|---|---|---|
+| `calculator` | Safe AST math evaluation | No code execution, AST-only |
+| `repository_search` | Search project files by name | Workspace-restricted |
+| `file_inspection` | Read project file contents | Path traversal protected, 500KB limit |
+| `project_metadata` | Framework, language, provider info | Read-only metadata |
+
+Shell execution is **strictly prohibited**. All tools enforce schema validation, 5-second timeouts, path containment, and audit logging.
+
+## Developer Command Palette
+
+Press `Ctrl+K` (or `Cmd+K`) to open the command palette:
+
+| Command | Action |
+|---|---|
+| `/new` | Start a new technical session |
+| `/context` | Toggle Context Ingestion Zone |
+| `/tools` | Inspect available workspace tools |
+| `/export` | Export session as Markdown or JSON |
+| `/clear` | Clear active session history |
+| `/settings` | Workbench preferences |
+| `/status` | Check provider readiness |
+
+## Context Ingestion Zone
+
+The slidable Context Ingestion Zone (`Ctrl+I`) supports:
+
+- **Drag & drop** code, text, logs, and configuration files
+- **Document parsing**: PDF (via `pdf.js`), PPTX and DOCX (via `JSZip`)
+- **Secret detection**: Auto-redacts API keys, tokens, passwords to `[REDACTED_SECRET]`
+- **Project metadata**: Name, tech stack, target environment
+- **Quick commands**: Explain Architecture, Debug Stacktrace, Refactor Code, Security Audit, Generate Tests
 
 ## Local Development
 
@@ -41,7 +121,8 @@ Open http://127.0.0.1:8000 — no migrations or database setup required, ever.
 | `GROQ_API_KEY` | Yes | Get one at https://console.groq.com/keys |
 | `SECRET_KEY` | Yes (prod) | Random Django secret key |
 | `DEBUG` | No | Default `False` — keep off in production |
-| `GROQ_MODEL` | No | Default `openai/gpt-oss-120b`; override with a model available to your Groq account |
+| `AI_PROVIDER` | No | Default `groq`; options: `groq`, `openrouter`, `ollama`, `openai` |
+| `GROQ_MODEL` | No | Default `openai/gpt-oss-120b`; override with available model |
 | `ALLOWED_HOSTS` | No prod | Comma-separated hostnames |
 | `CSRF_TRUSTED_ORIGINS` | No prod | Comma-separated origins (`https://...`) |
 
@@ -77,31 +158,48 @@ Note: serverless platforms buffer streaming responses inconsistently; Render/Rai
 (WSGI) give the smoothest SSE token streaming. Set `GROQ_API_KEY` and `SECRET_KEY`
 as project env vars, and set `ALLOWED_HOSTS=.vercel.app`.
 
-## How It Works
+## API Endpoints
 
-1. `chat.js` keeps the whole conversation in a local `chatHistory` array.
-2. Every send POSTs `{ message, history }` to `/api/chat/`.
-3. Django sanitises the history (roles, length caps) and streams the Groq
-   completion straight back to the browser as SSE events (`init`, `chunk`, `done`).
-4. Nothing touches a disk or database — restart/redeploy loses nothing that matters,
-   and scaling is trivially horizontal.
-
-## API
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/chat/` | POST | SSE streaming chat completion |
+| `/api/tools/` | GET | List registered tool schemas |
+| `/api/tools/` | POST | Execute a registered tool |
+| `/api/health/` | GET | Provider readiness check (no secrets) |
 
 `POST /api/chat/` accepts JSON with `message`, `history`, and a UUID `request_id`.
-It returns an SSE stream containing `init`, `chunk`, `done`, or `error` events.
+It returns an SSE stream of `message_start`, `message_delta`, `message_complete`, or `message_error` events.
 Messages are limited to 8,000 characters, request bodies to 256 KB, and the endpoint
-is limited to 10 requests per minute per IP. Reusing a request ID is rejected to
-prevent accidental duplicate submissions.
+is rate-limited to 10 requests per minute per IP.
 
-Run `python scripts/validate_env.py` before deployment to validate `.env`.
-Markdown output is sanitized in the browser with DOMPurify. Static assets are
-served with compression, content-versioned URLs, and revalidation headers. Configure
-`CORS_ALLOWED_ORIGINS` explicitly when the frontend is hosted on another origin.
+## Security
 
-## Quality checks
+- CSRF protection on all form endpoints
+- CORS restrictions via `django-cors-headers`
+- Rate limiting via `django-ratelimit` (10 req/min/IP)
+- Request payload size limits (256 KB)
+- UUID request ID validation and deduplication
+- Client-side secret detection and auto-redaction
+- Privacy-safe structured JSON logging (no API keys, prompts, or credentials)
+- Path traversal protection on file inspection tools
+- Safe health endpoint (no environment variable exposure)
+
+## Testing
 
 ```bash
-pytest
-python backend/manage.py check --deploy
+# Run full test suite (21 tests)
+$env:PYTHONPATH="backend"; python -m pytest -v
+
+# Django system checks
+python backend/manage.py check
+
+# Environment validation
+python scripts/validate_env.py
 ```
+
+## CI/CD
+
+GitHub Actions CI pipeline (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
+- Python 3.12 setup with pip caching
+- Django system checks
+- Full pytest suite execution

@@ -81,7 +81,9 @@
                         <span class="status-indicator-text" id="statusIndicatorText">Ready</span>
                     </div>
 
-                    <button type="button" class="theme-toggle ms-2" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme"><i class="fa-solid fa-sun"></i></button>
+                    <button type="button" class="btn-tool ms-1" onclick="toggleIngestionZone()" title="Toggle Context Ingestion Zone (Ctrl+I)"><i class="fa-solid fa-boxes-stacked text-success me-1"></i> Context Zone</button>
+                    <button type="button" class="theme-toggle ms-1" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme"><i class="fa-solid fa-sun"></i></button>
+
                     <button type="button" class="icon-btn" id="clearChatBtn" aria-label="Clear session" title="Clear current session"><i class="fa-solid fa-broom"></i></button>
                     <button type="button" class="icon-btn" id="settingsBtn" aria-label="Open settings" title="Settings"><i class="fa-solid fa-sliders"></i></button>
 
@@ -265,6 +267,28 @@
         </div>
     </div>
 
+    <!-- Command Palette Modal -->
+    <div class="modal-shell" id="commandPaletteModal" role="dialog" aria-modal="true" aria-labelledby="paletteTitle" hidden>
+        <div class="modal-card palette-card">
+            <div class="modal-heading mb-2">
+                <div><p class="eyebrow">COMMAND PALETTE</p><h2 id="paletteTitle">Developer Commands</h2></div>
+                <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close command palette"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="palette-input-wrapper mb-3">
+                <input type="text" id="paletteSearchInput" class="form-control bg-dark border-secondary text-light font-monospace" placeholder="Type a command or filter (e.g. /context)..." oninput="filterCommandPalette()">
+            </div>
+            <div class="palette-commands-list" id="paletteCommandsList">
+                <div class="palette-item" onclick="executePaletteCommand('/new')"><kbd>/new</kbd> <span>Start a new technical session</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/context')"><kbd>/context</kbd> <span>Toggle slidable Context Ingestion Zone</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/tools')"><kbd>/tools</kbd> <span>Inspect controlled workspace tools</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/export')"><kbd>/export</kbd> <span>Export session as Markdown / JSON</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/clear')"><kbd>/clear</kbd> <span>Clear active session history</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/settings')"><kbd>/settings</kbd> <span>Workbench preferences</span></div>
+                <div class="palette-item" onclick="executePaletteCommand('/status')"><kbd>/status</kbd> <span>Check provider readiness & status</span></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Shortcuts Modal -->
     <div class="modal-shell" id="shortcutsModal" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle" hidden>
         <div class="modal-card shortcuts-card">
@@ -272,13 +296,14 @@
                 <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
                 <button type="button" class="icon-btn modal-close" data-close-modal aria-label="Close shortcuts"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="shortcut-row"><span>New session</span><kbd>Ctrl / Cmd</kbd><kbd>K</kbd></div>
+            <div class="shortcut-row"><span>Command palette</span><kbd>Ctrl / Cmd</kbd><kbd>K</kbd></div>
             <div class="shortcut-row"><span>Send message</span><kbd>Enter</kbd></div>
             <div class="shortcut-row"><span>New line</span><kbd>Shift</kbd><kbd>Enter</kbd></div>
             <div class="shortcut-row"><span>Toggle context zone</span><kbd>Ctrl / Cmd</kbd><kbd>I</kbd></div>
             <div class="shortcut-row"><span>Close modal</span><kbd>Esc</kbd></div>
         </div>
     </div>
+
 
     <!-- Scripts & Document Parsers -->
     <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>

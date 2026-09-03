@@ -813,16 +813,32 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     100% { opacity: 0.3; transform: scale(0.9); }
 }
 
-/* Persistent Context Ingestion Zone */
+/* Persistent & Slidable Context Ingestion Zone */
 .ingestion-zone {
     background: var(--sidebar-bg);
     border-bottom: 1px solid var(--border-color);
     padding: 0.75rem 1.25rem;
-    transition: all 0.25s ease;
+    transition: padding 0.35s ease, background-color 0.25s ease;
     flex-shrink: 0;
+    overflow: hidden;
+}
+.ingestion-body {
+    max-height: 1200px;
+    opacity: 1;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease, margin-top 0.35s ease;
+    margin-top: 0.75rem;
+}
+.ingestion-zone.collapsed {
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
 }
 .ingestion-zone.collapsed .ingestion-body {
-    display: none;
+    display: block;
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    pointer-events: none;
 }
 .ingestion-header {
     display: flex;
@@ -835,11 +851,12 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     color: var(--green-neon);
 }
 .ingestion-toggle-icon {
-    transition: transform 0.2s ease;
+    transition: transform 0.3s ease;
 }
 .ingestion-zone:not(.collapsed) .ingestion-toggle-icon {
     transform: rotate(180deg);
 }
+
 
 /* Secret Alert Security Banner */
 .secret-alert-banner {
@@ -953,4 +970,46 @@ body[data-density="compact"] .messages-container { gap:.8rem; } body[data-densit
     color: var(--green-neon);
     background: rgba(16, 185, 129, 0.12);
 }
+
+/* Command Palette Styles */
+.palette-card {
+    width: min(100%, 500px);
+}
+.palette-commands-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    max-height: 280px;
+    overflow-y: auto;
+}
+.palette-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+    background: rgba(14, 24, 18, 0.5);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.palette-item:hover {
+    border-color: var(--green-neon);
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--green-neon);
+}
+.palette-item kbd {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.72rem;
+    font-family: 'Fira Code', monospace;
+    color: var(--green-neon);
+}
+.palette-item span {
+    font-size: 0.8rem;
+    color: var(--text-main);
+}
+
 

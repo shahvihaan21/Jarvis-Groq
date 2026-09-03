@@ -1,14 +1,15 @@
 """
-Jarvis AI — 100% stateless chat views.
+Jarvis AI — 100% stateless chat views and tool APIs.
 
 The Django server is a thin, stateless proxy: the browser owns the
 conversation history (JS array) and sends it with every request. Inference
-is streamed from the Groq API via SSE. Nothing is stored server-side.
+is streamed from the Groq / Multi-provider API via SSE. Nothing is stored server-side.
 """
 
 import hashlib
 import json
 import logging
+import os
 import uuid
 
 from django.conf import settings
@@ -19,6 +20,7 @@ from django_ratelimit.decorators import ratelimit
 
 from .config import GROQ_MODEL, MAX_HISTORY_TURNS, MAX_MESSAGE_CHARS, MAX_REQUEST_BYTES, SYSTEM_PROMPT
 from .provider import stream_provider_completion, sanitize_log_extra
+from .tools import execute_tool, get_registered_tools_schema, ToolExecutionError
 from .utils import claim_request
 
 logger = logging.getLogger(__name__)
@@ -63,19 +65,6 @@ def test_frontend(request):
 def chat_api(request):
     """
     Stateless SSE streaming endpoint.
-
-    Expects JSON:
-        {
-          "message": "the new user prompt",
-          "history": [{"role": "user"|"assistant", "content": "..."}, ...],
-          "request_id": "<uuid>"
-        }
-
-    Streams Server-Sent Events back:
-        init  -> metadata (model name, request_id)
-        chunk -> token delta
-        done  -> finished metadata
-        error -> category & message
     """
     if request.method != "POST":
         return JsonResponse({"error": "Only POST allowed"}, status=405)
@@ -144,12 +133,44 @@ def chat_api(request):
         return JsonResponse({"error": "Unable to process this request.", "category": "server_error"}, status=500)
 
 
+@csrf_exempt
+def tools_api(request):
+    """
+    Tools endpoint: GET returns tool schemas, POST executes a registered tool.
+    """
+    if request.method == "GET":
+        return JsonResponse({"tools": get_registered_tools_schema()})
+    elif request.method == "POST":
+        try:
+            data = json.loads(request.body) if request.body else {}
+            tool_name = data.get("tool")
+            arguments = data.get("arguments", {})
+            request_id = str(data.get("request_id") or uuid.uuid4())
+
+            if not tool_name:
+                return JsonResponse({"error": "tool parameter is required"}, status=400)
+
+            res = execute_tool(tool_name, arguments, request_id)
+            return JsonResponse(res)
+        except ToolExecutionError as te:
+            return JsonResponse({"error": str(te), "category": "tool_error"}, status=400)
+        except Exception as e:
+            logger.exception("tools_api_error")
+            return JsonResponse({"error": "Tool execution failed", "category": "internal"}, status=500)
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
 def health(request):
     """
     Safe health / readiness check endpoint.
     Deliberately contains no secret keys or sensitive configuration details.
     """
+    provider_name = os.getenv("AI_PROVIDER", "groq").lower()
+    has_groq_key = bool(os.getenv("GROQ_API_KEY"))
+
     return JsonResponse({
         "status": "ok",
         "service": "jarvis-groq",
+        "provider": provider_name,
+        "provider_configured": has_groq_key if provider_name == "groq" else True,
     })

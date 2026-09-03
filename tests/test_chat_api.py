@@ -91,7 +91,7 @@ def test_chat_api_rejects_duplicate_request_id():
 
 
 @override_settings(RATELIMIT_ENABLE=False)
-@patch("todo.provider.get_groq_client")
+@patch("todo.provider_adapters.get_groq_client")
 def test_chat_api_streams_completion(mock_client):
     class Delta:
         content = "Hi"
@@ -104,17 +104,17 @@ def test_chat_api_streams_completion(mock_client):
     body = b"".join(response.streaming_content).decode()
     assert response.status_code == 200
     assert response.headers.get("X-Request-ID") is not None
-    assert '"type": "done"' in body
+    assert '"type": "message_complete"' in body
 
 
 @override_settings(RATELIMIT_ENABLE=False)
-@patch("todo.provider.retry_groq_call")
+@patch("todo.provider_adapters.retry_groq_call")
 def test_chat_api_handles_streaming_provider_error(mock_retry):
-    mock_retry.side_effect = Exception("Groq connection timeout")
+    mock_retry.side_effect = TimeoutError("Groq connection timed out")
     response = Client().post("/api/chat/", data=json.dumps(payload()), content_type="application/json")
     body = b"".join(response.streaming_content).decode()
     assert response.status_code == 200
-    assert '"type": "error"' in body
+    assert '"type": "message_error"' in body
     assert '"category": "timeout"' in body
 
 

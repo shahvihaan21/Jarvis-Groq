@@ -222,13 +222,27 @@ function setUIState(newState, detailMessage = '') {
 }
 
 // ---------------------------------------------------------------------------
-// Technical Context Ingestion Zone (Req 21)
-// ---------------------------------------------------------------------------
+const INGESTION_COLLAPSED_KEY = 'jarvisIngestionCollapsed';
 
 function toggleIngestionZone() {
     const zone = document.getElementById('ingestionZone');
-    if (zone) zone.classList.toggle('collapsed');
+    if (zone) {
+        const isCollapsed = zone.classList.toggle('collapsed');
+        localStorage.setItem(INGESTION_COLLAPSED_KEY, isCollapsed ? 'true' : 'false');
+    }
 }
+
+function loadIngestionState() {
+    const zone = document.getElementById('ingestionZone');
+    if (!zone) return;
+    const isCollapsed = localStorage.getItem(INGESTION_COLLAPSED_KEY);
+    if (isCollapsed === 'false') {
+        zone.classList.remove('collapsed');
+    } else if (isCollapsed === 'true') {
+        zone.classList.add('collapsed');
+    }
+}
+
 
 async function extractPdfText(arrayBuffer) {
     try {
@@ -992,21 +1006,22 @@ async function sendPrompt(prompt, isNewSubmission = true) {
                 if (trimmed.startsWith('data: ')) {
                     try {
                         const event = JSON.parse(trimmed.slice(6));
-                        if (event.type === 'chunk') {
-                            accumulatedText += event.delta;
+                        if (event.type === 'chunk' || event.type === 'message_delta') {
+                            accumulatedText += (event.delta || '');
                             if (contentEl) contentEl.innerHTML = renderMarkdown(accumulatedText);
                             scrollToBottom();
-                        } else if (event.type === 'error') {
+                        } else if (event.type === 'error' || event.type === 'message_error') {
                             throw new Error(event.error || 'AI service failure occurred.');
                         }
                     } catch (parseErr) {
-                        if (trimmed.includes('"type": "error"')) {
+                        if (trimmed.includes('"type": "error"') || trimmed.includes('"type": "message_error"')) {
                             throw parseErr;
                         }
                     }
                 }
             }
         }
+
 
         if (accumulatedText) {
             chatHistory.push({ role: 'assistant', content: accumulatedText, time: timestamp });
@@ -1120,6 +1135,8 @@ document.addEventListener('DOMContentLoaded', () => {
     applySettings(getSettings());
     initSidebarResizer();
     loadProjectMeta();
+    loadIngestionState();
+
 
     // Setup drag and drop for context zone
     const dragArea = document.getElementById('dragDropArea');
@@ -1184,7 +1201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', e => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
             e.preventDefault();
-            startNewChat();
+            openCommandPalette();
         }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
             e.preventDefault();
@@ -1198,3 +1215,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
     resizeComposer();
 });
+
+// ---------------------------------------------------------------------------
+// Developer Command Palette Handlers (Phase 15)
+// ---------------------------------------------------------------------------
+
+function openCommandPalette() {
+    openModal('commandPaletteModal');
+    const input = document.getElementById('paletteSearchInput');
+    if (input) {
+        input.value = '';
+        input.focus();
+        filterCommandPalette();
+    }
+}
+
+function filterCommandPalette() {
+    const query = (document.getElementById('paletteSearchInput')?.value || '').toLowerCase().trim();
+    const items = document.querySelectorAll('.palette-item');
+    items.forEach(item => {
+        const text = item.innerText.toLowerCase();
+        if (!query || text.includes(query)) {
+            item.style.display = 'flex';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+function executePaletteCommand(cmd) {
+    closeModals();
+    switch (cmd) {
+        case '/new':
+            startNewChat();
+            break;
+        case '/context':
+            toggleIngestionZone();
+            break;
+        case '/tools':
+            fetchToolsSummary();
+            break;
+        case '/export':
+            openModal('exportModal');
+            break;
+        case '/clear':
+            clearCurrentConversation();
+            break;
+        case '/settings':
+            openModal('settingsModal');
+            break;
+        case '/status':
+            checkSystemStatus();
+            break;
+        default:
+            break;
+    }
+}
+
+async function fetchToolsSummary() {
+    try {
+        const resp = await fetch('/api/tools/');
+        const data = await resp.json();
+        const toolsList = (data.tools || []).map(t => `• ${t.name}: ${t.description}`).join('\n');
+        alert(`Registered Workspace Tools:\n\n${toolsList || 'No tools registered.'}`);
+    } catch (_) {
+        alert('Unable to fetch tools schema.');
+    }
+}
+
+async function checkSystemStatus() {
+    try {
+        const resp = await fetch('/api/health/');
+        const data = await resp.json();
+        alert(`System Readiness Status:\n\nService: ${data.service}\nProvider: ${data.provider}\nProvider Configured: ${data.provider_configured}\nStatus: ${data.status}`);
+    } catch (_) {
+        alert('System health check failed or endpoint unreachable.');
+    }
+}
+

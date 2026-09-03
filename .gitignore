@@ -1,4 +1,4 @@
-﻿# Environments
+# Environments
 .env
 .venv/
 .venv*/
@@ -54,3 +54,5 @@ pytest-cache-files-*/
 # Local environment and IDE files
 .env
 .vscode/
+PROJECT_EVOLUTION_SUMMARY.md
+

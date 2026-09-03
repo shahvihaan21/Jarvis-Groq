@@ -2,7 +2,7 @@
 .env
 .venv/
 .venv*/
-django/
+.venv-deploy/
 env/
 ENV/
 venv/
@@ -39,20 +39,8 @@ backend/staticfiles/
 .DS_Store
 Thumbs.db
 *.swp
-# Local Python environments
-.venv/
-.venv-*/
-venv/
-django/
 
-# Python and test artifacts
-__pycache__/
-*.py[cod]
+# Test artifacts
 .pytest_cache/
 pytest-cache-files-*/
-
-# Local environment and IDE files
-.env
-.vscode/
-PROJECT_EVOLUTION_SUMMARY.md
 

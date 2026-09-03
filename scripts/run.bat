@@ -4,7 +4,7 @@ REM  Jarvis AI - one-click local runner
 REM  Usage: double-click run.bat  (or run it from a terminal)
 REM ============================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 REM --- Create virtualenv on first run ---
 if not exist ".venv-deploy\Scripts\python.exe" (

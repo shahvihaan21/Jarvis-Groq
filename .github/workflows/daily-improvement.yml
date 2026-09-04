@@ -2,7 +2,7 @@ name: Daily Improvement
 
 on:
   schedule:
-    # Daily at 03:30 UTC
+    # Daily at 03:30 UTC (UTC)
     - cron: "30 3 * * *"
   workflow_dispatch:
   push:

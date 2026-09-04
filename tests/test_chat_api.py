@@ -108,8 +108,9 @@ def test_chat_api_streams_completion(mock_client):
 
 
 @override_settings(RATELIMIT_ENABLE=False)
+@patch("todo.provider_adapters.get_groq_client")
 @patch("todo.provider_adapters.retry_groq_call")
-def test_chat_api_handles_streaming_provider_error(mock_retry):
+def test_chat_api_handles_streaming_provider_error(mock_retry, mock_client):
     mock_retry.side_effect = TimeoutError("Groq connection timed out")
     response = Client().post("/api/chat/", data=json.dumps(payload()), content_type="application/json")
     body = b"".join(response.streaming_content).decode()

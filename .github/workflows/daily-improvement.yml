@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: daily-improvement
@@ -44,48 +43,17 @@ jobs:
           git config user.name "jarvis-daily-bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Run daily improvement engine (commit only, no push)
+      - name: Run daily improvement engine and push to main
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: python scripts/daily_improvement.py --no-push
+        run: python scripts/daily_improvement.py
 
-      - name: Check for new commits
-        id: commits
+      - name: Summary
+        if: always()
         run: |
-          COUNT=$(git rev-list origin/main..HEAD --count)
-          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "New commits: $COUNT"
-
-      - name: Push branch
-        if: steps.commits.outputs.count != '0'
-        id: push
-        run: |
-          PUSH_OUT=$(git push origin --force HEAD:refs/heads/daily-improvement 2>&1) || PUSH_CODE=1
           {
-            echo "### Branch push result"
+            echo "### Daily Improvement run"
             echo ""
-            echo "```"
-            echo "${PUSH_OUT:-push ok}"
-            echo "```"
+            echo "- Latest commit: $(git log -1 --pretty='%h %s')"
+            echo "- Sync state: $(git status -sb | head -1)"
           } >> "$GITHUB_STEP_SUMMARY"
-          exit ${PUSH_CODE:-0}
-
-      - name: Open/update PR
-        if: steps.commits.outputs.count != '0' && steps.push.conclusion == 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_HOST: github.com
-          GH_REPO: ${{ github.repository }}
-          BRANCH: daily-improvement
-        run: |
-          TITLE=$(git log -1 --pretty=%s | sed 's/ \[skip ci\]$//')
-          BODY=$(printf 'Automated daily improvement.\n\n**Commit message:** %s\n\nVerified: pytest + Django checks passed, secret scan clean.\nMerge to apply.' "$TITLE")
-          ERR_OUT=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1) || PR_CODE=$?
-          {
-            echo "### PR creation result (exit ${PR_CODE:-0})"
-            echo ""
-            echo '```'
-            echo "${ERR_OUT:-PR created}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit ${PR_CODE:-0}

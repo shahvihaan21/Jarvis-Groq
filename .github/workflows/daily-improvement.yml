@@ -74,20 +74,28 @@ jobs:
         if: steps.commits.outputs.count != '0' && steps.push.conclusion == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_DEBUG: "1"
+          GH_HOST: github.com
+          GH_REPO: ${{ github.repository }}
+          BRANCH: daily-improvement
         run: |
-          BRANCH=daily-improvement
+          set -x
+          gh auth status 2>&1 | tee /tmp/ghstatus.txt || true
           TITLE=$(git log -1 --pretty=%s | sed 's/ \[skip ci\]$//')
           BODY=$(printf 'Automated daily improvement.\n\n**Commit message:** %s\n\nVerified: pytest + Django checks passed, secret scan clean.\nMerge to apply.' "$TITLE")
-          PR_URL=""
-          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qi open; then
-            PR_URL=$(gh pr edit "$BRANCH" --title "$TITLE" --body "$BODY" 2>&1 && gh pr view "$BRANCH" --json url --jq .url)
-          else
-            PR_URL=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1)
-          fi
+          ERR_OUT=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1) || PR_CODE=$?
           {
-            echo "### Daily Improvement PR"
+            echo "### PR creation result (exit ${PR_CODE:-0})"
             echo ""
             echo "```"
-            echo "$PR_URL"
+            echo "${ERR_OUT:-PR created}"
             echo "```"
+            echo ""
+            echo "<details><summary>gh auth status</summary>"
+            echo ""
+            echo "```"
+            cat /tmp/ghstatus.txt 2>/dev/null || echo "(unavailable)"
+            echo "```"
+            echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
+          exit ${PR_CODE:-0}

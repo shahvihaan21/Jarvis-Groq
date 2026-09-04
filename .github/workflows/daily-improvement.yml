@@ -5,6 +5,10 @@ on:
     # Every day at 03:30 UTC
     - cron: "30 3 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/daily-improvement.yml"
 
 permissions:
   contents: write

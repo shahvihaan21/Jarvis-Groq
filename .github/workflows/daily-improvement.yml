@@ -74,22 +74,18 @@ jobs:
         if: steps.commits.outputs.count != '0' && steps.push.conclusion == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_DEBUG: "1"
           GH_HOST: github.com
           GH_REPO: ${{ github.repository }}
           BRANCH: daily-improvement
         run: |
-          set -x
-          echo "before gh"; gh auth status 2>&1; echo "ghstatus=$?"; echo "after gh"
           TITLE=$(git log -1 --pretty=%s | sed 's/ \[skip ci\]$//')
           BODY=$(printf 'Automated daily improvement.\n\n**Commit message:** %s\n\nVerified: pytest + Django checks passed, secret scan clean.\nMerge to apply.' "$TITLE")
-          set +e
-          ERR_OUT=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1)
-          PR_CODE=$?
-          set -e
-          echo "PR_CODE=$PR_CODE"
-          echo "ERR_OUT=$ERR_OUT"
-          exit $PR_CODE
-          echo "SUMMARYTEST-$(date +%s)" > "$GITHUB_STEP_SUMMARY"
-          echo "step end"
+          ERR_OUT=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1) || PR_CODE=$?
+          {
+            echo "### PR creation result (exit ${PR_CODE:-0})"
+            echo ""
+            echo '```'
+            echo "${ERR_OUT:-PR created}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           exit ${PR_CODE:-0}

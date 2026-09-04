@@ -120,7 +120,7 @@ CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"json": {"()": "pythonjsonlogger.jsonlogger.JsonFormatter"}},
+    "formatters": {"json": {"()": "pythonjsonlogger.json.JsonFormatter"}},
     "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "json"}},
     "loggers": {"todo": {"handlers": ["console"], "level": "INFO", "propagate": False}},
 }

@@ -56,17 +56,40 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "New commits: $COUNT"
 
-      - name: Push improvement branch and open/update PR
+      - name: Push branch
         if: steps.commits.outputs.count != '0'
+        id: push
+        run: |
+          PUSH_OUT=$(git push origin --force HEAD:refs/heads/daily-improvement 2>&1) || PUSH_CODE=1
+          echo "push_result=$PUSH_OUT" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Branch push result"
+            echo ""
+            echo "```"
+            echo "${PUSH_OUT:-push ok}"
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit ${PUSH_CODE:-0}
+
+      - name: Open/update PR
+        if: steps.commits.outputs.count != '0' && steps.push.conclusion == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH=daily-improvement
-          git push origin --force HEAD:refs/heads/$BRANCH
           TITLE=$(git log -1 --pretty=%s | sed 's/ \[skip ci\]$//')
           BODY=$(printf 'Automated daily improvement.\n\n**Commit message:** %s\n\nVerified: pytest + Django checks passed, secret scan clean.\nMerge to apply.' "$TITLE")
+          PR_URL=""
           if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qi open; then
-            gh pr edit "$BRANCH" --title "$TITLE" --body "$BODY"
+            PR_URL=$(gh pr edit "$BRANCH" --title "$TITLE" --body "$BODY" 2>&1 && gh pr view "$BRANCH" --json url --jq .url)
           else
-            gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY"
+            PR_URL=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1)
           fi
+          echo "pr_result=$PR_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Daily Improvement PR"
+            echo ""
+            echo "```"
+            echo "$PR_URL"
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"

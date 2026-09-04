@@ -80,23 +80,16 @@ jobs:
           BRANCH: daily-improvement
         run: |
           set -x
-          gh auth status 2>&1 | tee /tmp/ghstatus.txt || true
+          echo "before gh"; gh auth status 2>&1; echo "ghstatus=$?"; echo "after gh"
           TITLE=$(git log -1 --pretty=%s | sed 's/ \[skip ci\]$//')
           BODY=$(printf 'Automated daily improvement.\n\n**Commit message:** %s\n\nVerified: pytest + Django checks passed, secret scan clean.\nMerge to apply.' "$TITLE")
-          ERR_OUT=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1) || PR_CODE=$?
+          set +e
+          ERR_OUT=$(gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY" 2>&1)
+          PR_CODE=$?
+          set -e
+          echo "PR_CODE=$PR_CODE"
+          echo "ERR_OUT=$ERR_OUT"
+          exit $PR_CODE
           echo "SUMMARYTEST-$(date +%s)" > "$GITHUB_STEP_SUMMARY"
-          {
-            echo "### PR creation result (exit ${PR_CODE:-0})"
-            echo ""
-            echo "```"
-            echo "${ERR_OUT:-PR created}"
-            echo "```"
-            echo ""
-            echo "<details><summary>gh auth status</summary>"
-            echo ""
-            echo "```"
-            cat /tmp/ghstatus.txt 2>/dev/null || echo "(unavailable)"
-            echo "```"
-            echo "</details>"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "step end"
           exit ${PR_CODE:-0}

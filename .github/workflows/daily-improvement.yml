@@ -1,0 +1,68 @@
+name: Daily Improvement
+
+on:
+  schedule:
+    # Every day at 03:30 UTC
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: daily-improvement
+  cancel-in-progress: false
+
+jobs:
+  improve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Configure git
+        run: |
+          git config user.name "jarvis-daily-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Run daily improvement engine (commit only, no push)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: python scripts/daily_improvement.py --no-push
+
+      - name: Check for new commits
+        id: commits
+        run: |
+          COUNT=$(git rev-list origin/main..HEAD --count)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "New commits: $COUNT"
+
+      - name: Push improvement branch and open/update PR
+        if: steps.commits.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH=daily-improvement
+          git push origin --force HEAD:refs/heads/$BRANCH
+          TITLE=$(git log -1 --pretty=%s | sed 's/ \[skip ci\]$//')
+          BODY=$(printf 'Automated daily improvement.\n\n**Commit message:** %s\n\nVerified: pytest + Django checks passed, secret scan clean.\nMerge to apply.' "$TITLE")
+          if gh pr view "$BRANCH" --json state --jq .state 2>/dev/null | grep -qi open; then
+            gh pr edit "$BRANCH" --title "$TITLE" --body "$BODY"
+          else
+            gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "$BODY"
+          fi

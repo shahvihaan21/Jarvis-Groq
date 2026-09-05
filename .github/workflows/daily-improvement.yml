@@ -2,7 +2,7 @@ name: Daily Improvement
 
 on:
   schedule:
-    # Daily at 03:30 UTC (UTC)
+    # Daily at 03:30 UTC (09:00 IST)
     - cron: "30 3 * * *"
   workflow_dispatch:
   push:
@@ -26,7 +26,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          ref: main
+          persist-credentials: true
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -44,16 +45,29 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
 
       - name: Run daily improvement engine and push to main
+        id: improvement
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: python scripts/daily_improvement.py
-
+        run: |
+          set -o pipefail
+          python scripts/daily_improvement.py 2>&1 | tee daily-improvement-output.log
       - name: Summary
         if: always()
         run: |
           {
             echo "### Daily Improvement run"
             echo ""
+            echo "- Result: ${{ steps.improvement.outcome }}"
+            echo "- Engine report:"
+            if [ -f daily-improvement-output.log ]; then
+              grep -E "Candidates discovered:|Selected improvement:|No significant safe improvement|Post-improvement|Committed improvement:|Validation failed|Baseline test suite|Push successful|Failed to push" daily-improvement-output.log || true
+            else
+              echo "  Engine output was not produced."
+            fi
             echo "- Latest commit: $(git log -1 --pretty='%h %s')"
-            echo "- Sync state: $(git status -sb | head -1)"
+            echo "- Final repository state: $(git status -sb | head -1)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.improvement.outcome }}" != "success" ]; then
+            echo "Daily improvement engine failed; see the engine output above and workflow logs." >&2
+          fi

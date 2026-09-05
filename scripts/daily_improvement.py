@@ -16,9 +16,10 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Optional
-
+from typing import Any, Callable
+from improvement_analyzer import analyze_repository
 ROOT = Path(__file__).resolve().parent.parent
+MINIMUM_SCORE = 55.0
 LOG_FILE = ROOT / ".github" / "codex" / "improvement-log.md"
 RULES_FILE = ROOT / ".github" / "codex" / "daily-improvement.md"
 
@@ -189,11 +190,11 @@ def apply_tool_edge_case_tests() -> tuple[str, list[str]]:
 
 
 CATALOG_IMPROVEMENTS: list[Callable[[], tuple[str, list[str]]]] = [
-    apply_deprecation_warning_fix,
-    apply_health_endpoint_metadata,
-    apply_security_headers_hardening,
-    apply_tool_edge_case_tests,
-]
+    "Upgrade JsonFormatter import to eliminate deprecation warning": apply_deprecation_warning_fix,
+    "Include UTC timestamp in the health check response": apply_health_endpoint_metadata,
+    "Harden HTTP security headers with nosniff and XSS protection": apply_security_headers_hardening,
+    "Add edge-case tests for calculator and empty repository search": apply_tool_edge_case_tests,
+}
 
 
 def execute_catalog_improvement() -> tuple[str, list[str]]:
@@ -229,7 +230,7 @@ def main() -> int:
 
     print("=== Jarvis Autonomous Daily Improvement Engine ===")
     print("Checking repository state and baseline tests...")
-    
+
     try:
         run_test_suite()
         print("Baseline test suite passed successfully.")
@@ -241,25 +242,26 @@ def main() -> int:
         print("Repository is in a healthy, fully verified state.")
         return 0
 
-    title, target_files = execute_catalog_improvement()
-
-    if not title:
-        print("All catalog improvements are already applied. Performing system health check.")
-        run_test_suite()
-        print("Daily repository maintenance and integrity check completed.")
+    candidate, candidates = select_improvement()
+    print(f"Candidates discovered: {len(candidates)}")
+    if not candidate:
+        print("No significant safe improvement found today. Repository unchanged.")
         return 0
-
-    print(f"Applying minor improvement: {title}")
+    title = candidate["title"]
+    target_files = candidate["affected_files"]
+    print(f"Selected improvement: {title} (score {candidate['score']:.2f})")
     print(f"Target files: {target_files}")
 
     try:
         check_syntax([f for f in target_files if f.endswith(".py")])
         verify_security_and_limits(target_files)
         run_test_suite()
-        print("Post-improvement test suite passed successfully.")
+        update_log(candidate, target_files, "Django check + pytest passed")
+        verify_security_and_limits(target_files + [str(LOG_FILE.relative_to(ROOT))])
+        print("Post-improvement tests and improvement-log validation passed successfully.")
     except Exception as e:
         print(f"Validation failed after improvement: {e}. Initiating rollback...", file=sys.stderr)
-        rollback(target_files)
+        rollback(target_files + ([str(LOG_FILE.relative_to(ROOT))] if LOG_FILE.exists() else []))
         return 1
 
     if args.dry_run:

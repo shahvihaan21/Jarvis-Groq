@@ -1,206 +1,550 @@
-# Jarvis AI — Production-Grade Stateless AI Platform
+# ⚡ Jarvis AI
 
-A 100% stateless, database-free Django AI assistant platform. The browser owns the conversation
-history (JS array); Django is a thin SSE proxy that streams tokens from
-**Groq**, **OpenRouter**, **Ollama**, or any **OpenAI-compatible** provider.
-No database, no migrations, no server-side state — deploy anywhere.
+### Production-Grade Stateless AI Platform
 
-## Architecture
+> A lightweight, secure, multi-provider AI assistant built with Django, SSE streaming, and a controlled autonomous improvement pipeline.
 
+**Stateless · Database-Free · Multi-Provider · SSE Streaming · Security-Focused · Self-Improving**
+
+---
+
+## ✨ Overview
+
+Jarvis AI is a **100% stateless, database-free Django AI assistant platform**.
+
+The browser owns conversation history while Django acts as a thin backend and SSE streaming layer for:
+
+* **Groq**
+* **OpenRouter**
+* **Ollama**
+* **OpenAI**
+* Other OpenAI-compatible providers
+
+There is no database, no migrations, and no server-side conversation state.
+
+The project is designed around a simple principle:
+
+> **Keep the application lightweight while making the engineering pipeline increasingly reliable, testable, and safe.**
+
+---
+
+## 🧩 Architecture
+
+```text
+                         ┌─────────────────────┐
+                         │      Browser UI     │
+                         │ Chat + File Zone    │
+                         │ Command Palette     │
+                         └──────────┬──────────┘
+                                    │
+                              HTTP / SSE
+                                    │
+                         ┌──────────▼──────────┐
+                         │       Django        │
+                         │ Stateless API Layer │
+                         └──────────┬──────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+       ┌──────▼──────┐      ┌──────▼──────┐      ┌──────▼──────┐
+       │   Provider  │      │    Tools    │      │   Security  │
+       │   Layer     │      │   Framework │      │   Controls  │
+       └──────┬──────┘      └─────────────┘      └─────────────┘
+              │
+       ┌──────┼───────────────┬───────────────┐
+       │      │               │               │
+     Groq  OpenRouter       Ollama          OpenAI
 ```
+
+### Repository Structure
+
+```text
 project-root/
 ├── backend/
-│   ├── ai/                    # Settings, URLs, WSGI
+│   ├── ai/
+│   │   └── settings.py       # Django configuration & security
 │   └── todo/
-│       ├── config.py          # Centralized configuration (timeouts, limits, system prompt)
-│       ├── provider.py        # SSE streaming orchestrator
-│       ├── provider_adapters.py  # Multi-provider abstraction (Groq, OpenAI-compatible, Ollama)
-│       ├── tools.py           # Controlled tool framework (calculator, repo search, file inspect)
-│       ├── views.py           # Thin stateless views + health + tools API
-│       ├── services.py        # Provider boundary compatibility layer
-│       └── utils.py           # Retry logic & request dedup
+│       ├── config.py         # Central configuration
+│       ├── provider.py       # SSE streaming orchestration
+│       ├── provider_adapters.py
+│       │                       # Multi-provider abstraction
+│       ├── tools.py          # Controlled workspace tools
+│       ├── views.py          # API endpoints
+│       ├── services.py       # Provider boundary layer
+│       └── utils.py          # Retry & request deduplication
+│
 ├── frontend/
 │   ├── static/
-│   │   ├── css/style.css      # Dark/light theme, resizable sidebar, command palette
-│   │   └── js/chat.js         # SSE engine, file attachment, session persistence
+│   │   ├── css/style.css     # UI, themes & layout
+│   │   └── js/chat.js        # SSE client & session logic
 │   └── templates/
 │       └── todo/
-│           ├── index.html     # Main workspace UI
-│           └── test_frontend.html  # Browser-side test suite
+│           ├── index.html
+│           └── test_frontend.html
+│
 ├── tests/
-│   ├── test_chat_api.py       # 12 API & streaming tests
-│   └── test_tools.py          # 9 tool & security boundary tests
+│   ├── test_chat_api.py
+│   └── test_tools.py
+│
 ├── scripts/
-│   └── validate_env.py        # Pre-deployment environment validator
-├── .github/workflows/ci.yml   # GitHub Actions CI pipeline
+│   ├── validate_env.py
+│   └── daily_improvement.py  # Autonomous improvement engine
+│
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml
+│   │   └── daily-improvement.yml
+│   └── codex/
+│       └── improvement-log.md
+│
 ├── .env.example
 ├── .gitignore
 ├── Procfile
 ├── requirements.txt
-└── runtime.txt
+├── runtime.txt
+└── vercel.json
 ```
 
-## Multi-Provider System
+---
 
-Jarvis supports configuration-driven provider selection via the `AI_PROVIDER` environment variable:
+## 🤖 Autonomous Daily Improvement Engine
 
-| Provider | `AI_PROVIDER` | Required Env Vars |
-|---|---|---|
-| **Groq** (default) | `groq` | `GROQ_API_KEY` |
+Jarvis includes a controlled automated engineering pipeline designed to make **one small, verified improvement per run**.
+
+### Current flow
+
+```text
+┌──────────────────────────────┐
+│ Scheduled GitHub Action      │
+└──────────────┬───────────────┘
+               ↓
+┌──────────────────────────────┐
+│ Verify clean repository      │
+└──────────────┬───────────────┘
+               ↓
+┌──────────────────────────────┐
+│ Run baseline validation      │
+└──────────────┬───────────────┘
+               ↓
+┌──────────────────────────────┐
+│ Select unused safe           │
+│ improvement from catalog     │
+└──────────────┬───────────────┘
+               ↓
+┌──────────────────────────────┐
+│ Modify target file(s)        │
+└──────────────┬───────────────┘
+               ↓
+┌──────────────────────────────┐
+│ Security + syntax + tests    │
+└──────────────┬───────────────┘
+               ↓
+          ┌────┴────┐
+          │         │
+        PASS       FAIL
+          │         │
+          ↓         ↓
+       Log +      Rollback
+       Commit     to baseline
+          │
+          ↓
+         Push
+```
+
+The engine is deliberately conservative.
+
+It currently:
+
+* Applies **one verified improvement per run**
+* Validates the repository before changing it
+* Runs Django system checks
+* Runs the complete pytest suite
+* Checks modified Python files for syntax errors
+* Limits the number of changed files
+* Limits the number of changed lines
+* Blocks protected files and workflow modifications
+* Scans diffs for possible secrets
+* Automatically rolls back failed improvements
+* Skips already-recorded improvements
+* Maintains an improvement history
+* Refuses to commit an unvalidated change
+
+### Important Design Boundary
+
+The current engine is **catalog-driven**.
+
+It selects from predefined safe improvements rather than independently inventing arbitrary repository changes.
+
+In other words:
+
+```text
+Current:
+Catalog → Select → Modify → Verify → Log → Commit
+
+Not currently:
+Repository analysis → Discover problem → Design solution
+→ Modify dynamically → Verify → Log → Commit
+```
+
+This distinction is intentional: **safety currently takes priority over unrestricted autonomy.**
+
+---
+
+## 🔌 Multi-Provider AI
+
+Select the provider using:
+
+```env
+AI_PROVIDER=groq
+```
+
+| Provider       | Value        | Required Configuration              |
+| -------------- | ------------ | ----------------------------------- |
+| **Groq**       | `groq`       | `GROQ_API_KEY`                      |
 | **OpenRouter** | `openrouter` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
-| **Ollama** (local) | `ollama` | None (defaults to `http://localhost:11434/v1`) |
-| **OpenAI** | `openai` | `OPENAI_API_KEY` |
+| **Ollama**     | `ollama`     | Local Ollama server                 |
+| **OpenAI**     | `openai`     | `OPENAI_API_KEY`                    |
 
-Provider adapters normalize all upstream errors into safe application categories (`timeout`, `rate_limit`, `authentication`, `validation`, `provider_failure`). Credentials are never exposed in logs, responses, or error messages.
+All providers pass through a common adapter layer.
 
-## SSE Streaming Protocol
+Provider failures are normalized into safe categories:
 
-All streaming uses a standardized event protocol shared between backend and frontend:
+```text
+timeout
+rate_limit
+authentication
+validation
+provider_failure
+```
 
-| Event | Description |
-|---|---|
-| `message_start` | Stream initialized with `request_id`, `model`, `provider`, `timestamp` |
-| `message_delta` | Incremental text chunk (`delta` field) |
-| `message_complete` | Stream finished with `duration_ms` and `token_count` |
-| `message_error` | Classified error with `category` and user-safe `error` message |
+Credentials are never returned through application errors or logs.
 
-## Controlled Tool Framework
+---
 
-Safe, bounded workspace tools accessible via `/api/tools/`:
+## 🌊 SSE Streaming
 
-| Tool | Description | Safety |
-|---|---|---|
-| `calculator` | Safe AST math evaluation | No code execution, AST-only |
-| `repository_search` | Search project files by name | Workspace-restricted |
-| `file_inspection` | Read project file contents | Path traversal protected, 500KB limit |
-| `project_metadata` | Framework, language, provider info | Read-only metadata |
+The backend and frontend use a standardized streaming protocol.
 
-Shell execution is **strictly prohibited**. All tools enforce schema validation, 5-second timeouts, path containment, and audit logging.
+| Event              | Purpose                       |
+| ------------------ | ----------------------------- |
+| `message_start`    | Initializes the response      |
+| `message_delta`    | Sends incremental text        |
+| `message_complete` | Signals successful completion |
+| `message_error`    | Sends a classified safe error |
 
-## Developer Command Palette
+A request carries a UUID `request_id` for request tracking and deduplication.
 
-Press `Ctrl+K` (or `Cmd+K`) to open the command palette:
+---
 
-| Command | Action |
-|---|---|
-| `/new` | Start a new technical session |
-| `/context` | Toggle File Zone |
-| `/tools` | Inspect available workspace tools |
-| `/export` | Export session as Markdown or JSON |
-| `/clear` | Clear active session history |
-| `/settings` | Workbench preferences |
-| `/status` | Check provider readiness |
+## 🛠️ Controlled Tool Framework
 
-## File Zone
+Available through `/api/tools/`.
 
-The slidable File Zone (`Ctrl+I`) supports:
+| Tool                | Purpose                      | Protection                    |
+| ------------------- | ---------------------------- | ----------------------------- |
+| `calculator`        | Safe mathematical evaluation | AST-only                      |
+| `repository_search` | Search project files         | Workspace restricted          |
+| `file_inspection`   | Inspect project files        | Path containment + size limit |
+| `project_metadata`  | Read project metadata        | Read-only                     |
 
-- **Drag & drop** files (code, text, logs, and configuration)
-- **Notes area**: a single paste-anywhere scratchpad for notes, requirements, logs, or config
-- **Document parsing**: PDF (via `pdf.js`), PPTX and DOCX (via `JSZip`)
-- **Secret detection**: Auto-redacts API keys, tokens, passwords to `[REDACTED_SECRET]`
-- **Project metadata**: Name, tech stack, target environment
-- **Quick commands**: Explain Architecture, Debug Stacktrace, Refactor Code, Security Audit, Generate Tests
+### Safety Rules
 
-## Local Development
+* No shell execution
+* Schema validation
+* Workspace path containment
+* Execution time limits
+* File-size limits
+* Audit logging
+* Protected paths
+* Secret detection
+
+---
+
+## 🖥️ Developer Workspace
+
+### Command Palette
+
+Press **`Ctrl+K`** / **`Cmd+K`**.
+
+| Command     | Function                      |
+| ----------- | ----------------------------- |
+| `/new`      | Start a new technical session |
+| `/context`  | Toggle File Zone              |
+| `/tools`    | Inspect available tools       |
+| `/export`   | Export session                |
+| `/clear`    | Clear session                 |
+| `/settings` | Workbench preferences         |
+| `/status`   | Provider readiness            |
+
+### File Zone
+
+Press **`Ctrl+I`**.
+
+Supports:
+
+* Drag & drop files
+* Code and text inspection
+* Notes / scratchpad
+* PDF parsing
+* PPTX / DOCX parsing
+* Secret detection and redaction
+* Project metadata
+* Architecture explanation
+* Debugging
+* Refactoring
+* Security auditing
+* Test generation
+
+---
+
+## 🔐 Security
+
+Jarvis applies multiple layers of protection:
+
+* CSRF protection
+* CORS restrictions
+* Rate limiting
+* Request-body limits
+* Message-size limits
+* UUID validation
+* Request deduplication
+* Secret detection
+* Secret redaction
+* Privacy-safe structured logging
+* Path traversal protection
+* Safe health endpoint
+* Browser security headers
+* Protected autonomous-improvement paths
+
+The autonomous engine additionally refuses modifications to:
+
+```text
+.env
+.env.example
+Procfile
+runtime.txt
+vercel.json
+.github/workflows/*
+.git/*
+```
+
+---
+
+## 🧪 Testing
+
+Run the complete test suite:
+
+```powershell
+$env:PYTHONPATH="backend"
+python -m pytest -v
+```
+
+Run Django checks:
+
+```bash
+python backend/manage.py check
+```
+
+Validate the environment:
+
+```bash
+python scripts/validate_env.py
+```
+
+The autonomous improvement engine also performs baseline and post-change validation before accepting an improvement.
+
+---
+
+## 🚀 Local Development
+
+### 1. Create a virtual environment
 
 ```bash
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt   # Windows
-copy .env.example .env                           # add your GROQ_API_KEY
+```
 
+### 2. Install dependencies
+
+**Windows**
+
+```powershell
+.venv\Scripts\pip install -r requirements.txt
+```
+
+### 3. Configure environment
+
+```powershell
+copy .env.example .env
+```
+
+Add your provider credentials.
+
+### 4. Start Django
+
+```bash
 cd backend
 python manage.py runserver
 ```
 
-Open http://127.0.0.1:8000 — no migrations or database setup required, ever.
+Open:
 
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `GROQ_API_KEY` | Yes | Get one at https://console.groq.com/keys |
-| `SECRET_KEY` | Yes (prod) | Random Django secret key |
-| `DEBUG` | No | Default `False` — keep off in production |
-| `AI_PROVIDER` | No | Default `groq`; options: `groq`, `openrouter`, `ollama`, `openai` |
-| `GROQ_MODEL` | No | Default `openai/gpt-oss-120b`; override with available model |
-| `ALLOWED_HOSTS` | No prod | Comma-separated hostnames |
-| `CSRF_TRUSTED_ORIGINS` | No prod | Comma-separated origins (`https://...`) |
-
-## Deploying to Render
-
-1. Push this repo to GitHub.
-2. In Render: **New → Web Service**, connect the repo.
-3. Settings:
-   - **Runtime**: Python 3
-   - **Build Command**: `pip install -r requirements.txt && python backend/manage.py collectstatic --noinput`
-   - **Start Command**: `gunicorn --chdir backend --workers 2 --threads 4 --timeout 120 ai.wsgi:application`
-4. Add environment variables: `GROQ_API_KEY`, `SECRET_KEY`, `DEBUG=False`,
-   `ALLOWED_HOSTS=<your-app>.onrender.com`, `CSRF_TRUSTED_ORIGINS=https://<your-app>.onrender.com`.
-5. Deploy. Render reads `runtime.txt` for the Python version.
-
-## Deploying to Railway
-
-1. Push the repo, then in Railway: **New Project → Deploy from GitHub repo**.
-2. Railway auto-detects Python; ensure the start command is
-   `gunicorn --chdir backend --workers 2 --threads 4 --timeout 120 ai.wsgi:application`
-   (or use the included `Procfile`).
-3. In **Variables**, add `GROQ_API_KEY`, `SECRET_KEY`, `DEBUG=False`,
-   `ALLOWED_HOSTS=<yourapp>.up.railway.app`, `CSRF_TRUSTED_ORIGINS=https://<yourapp>.up.railway.app`.
-4. Build command: `pip install -r requirements.txt && python backend/manage.py collectstatic --noinput`.
-
-## Deploying to Vercel (Serverless)
-
-The repository already includes `vercel.json`. It routes `/api/index.py` to the
-Django WSGI application and serves `frontend/static` directly, so do not replace
-it with a WSGI-only configuration or the frontend assets will stop loading.
-
-Note: serverless platforms buffer streaming responses inconsistently; Render/Railway
-(WSGI) give the smoothest SSE token streaming. Set `GROQ_API_KEY` and `SECRET_KEY`
-as project env vars, and set `ALLOWED_HOSTS=.vercel.app`.
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/chat/` | POST | SSE streaming chat completion |
-| `/api/tools/` | GET | List registered tool schemas |
-| `/api/tools/` | POST | Execute a registered tool |
-| `/api/health/` | GET | Provider readiness check (no secrets) |
-
-`POST /api/chat/` accepts JSON with `message`, `history`, and a UUID `request_id`.
-It returns an SSE stream of `message_start`, `message_delta`, `message_complete`, or `message_error` events.
-Messages are limited to 8,000 characters, request bodies to 256 KB, and the endpoint
-is rate-limited to 10 requests per minute per IP.
-
-## Security
-
-- CSRF protection on all form endpoints
-- CORS restrictions via `django-cors-headers`
-- Rate limiting via `django-ratelimit` (10 req/min/IP)
-- Request payload size limits (256 KB)
-- UUID request ID validation and deduplication
-- Client-side secret detection and auto-redaction
-- Privacy-safe structured JSON logging (no API keys, prompts, or credentials)
-- Path traversal protection on file inspection tools
-- Safe health endpoint (no environment variable exposure)
-
-## Testing
-
-```bash
-# Run full test suite (21 tests)
-$env:PYTHONPATH="backend"; python -m pytest -v
-
-# Django system checks
-python backend/manage.py check
-
-# Environment validation
-python scripts/validate_env.py
+```text
+http://127.0.0.1:8000
 ```
 
-## CI/CD
+No database or migrations are required.
 
-GitHub Actions CI pipeline (`.github/workflows/ci.yml`) runs on every push/PR to `main`:
-- Python 3.12 setup with pip caching
-- Django system checks
-- Full pytest suite execution
+---
+
+## 🌍 Deployment
+
+### Render
+
+Build:
+
+```bash
+pip install -r requirements.txt && python backend/manage.py collectstatic --noinput
+```
+
+Start:
+
+```bash
+gunicorn --chdir backend --workers 2 --threads 4 --timeout 120 ai.wsgi:application
+```
+
+### Railway
+
+Use the same Gunicorn command or the included `Procfile`.
+
+### Vercel
+
+The repository includes `vercel.json`.
+
+It routes the API through the Django WSGI application while serving frontend assets separately.
+
+> For smoothest SSE streaming, traditional WSGI deployments such as Render or Railway are preferred over serverless environments that may buffer streaming responses.
+
+---
+
+## 📡 API
+
+| Endpoint       | Method | Purpose               |
+| -------------- | ------ | --------------------- |
+| `/api/chat/`   | `POST` | SSE chat completion   |
+| `/api/tools/`  | `GET`  | List registered tools |
+| `/api/tools/`  | `POST` | Execute a tool        |
+| `/api/health/` | `GET`  | Provider readiness    |
+
+### Chat Request
+
+```json
+{
+  "message": "Hello Jarvis",
+  "history": [],
+  "request_id": "uuid"
+}
+```
+
+Limits currently include:
+
+* Message: **8,000 characters**
+* Request body: **256 KB**
+* Rate limit: **10 requests/minute/IP**
+
+---
+
+## 🔄 CI/CD
+
+GitHub Actions runs the normal CI pipeline on pushes and pull requests to `main`.
+
+The CI pipeline performs:
+
+```text
+Python setup
+    ↓
+Dependency installation
+    ↓
+Django system checks
+    ↓
+Full pytest suite
+```
+
+The separate daily-improvement workflow runs the controlled autonomous improvement engine on its schedule.
+
+---
+
+## 📜 Improvement History
+
+Verified autonomous changes are recorded in:
+
+```text
+.github/codex/improvement-log.md
+```
+
+Each entry records:
+
+```text
+Date
+Improvement
+Target files
+Verification status
+```
+
+This provides a lightweight audit trail of automated repository changes.
+
+---
+
+## 🎯 Design Philosophy
+
+Jarvis is intentionally built around several constraints:
+
+**Stateless**
+
+No server-side conversation database.
+
+**Provider-Agnostic**
+
+The application should not depend on a single model provider.
+
+**Controlled**
+
+Tools and automated modifications operate inside explicit boundaries.
+
+**Tested**
+
+Changes are accepted only after validation.
+
+**Reversible**
+
+Failed autonomous changes are rolled back.
+
+**Incremental**
+
+The improvement engine makes small changes rather than attempting uncontrolled rewrites.
+
+---
+
+## 📌 Project Status
+
+Jarvis is an actively evolving engineering project.
+
+The core platform currently combines:
+
+```text
+Django
++ SSE Streaming
++ Multi-Provider AI
++ Controlled Tools
++ Security Boundaries
++ Automated Testing
++ GitHub CI/CD
++ Controlled Daily Improvements
+```
+
+The autonomous improvement system is intentionally **not unrestricted self-modifying AI**. Its current objective is to make small, measurable, verifiable improvements while minimizing the probability of breaking the application.
+
+---
+
+## 📄 License
+
+See the repository license for usage and distribution terms.

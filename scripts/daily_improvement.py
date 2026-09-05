@@ -23,7 +23,10 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
+
+
 ROOT = Path(__file__).resolve().parent.parent
+
 LOG_FILE = ROOT / ".github" / "codex" / "improvement-log.md"
 
 MAX_CHANGED_FILES = 5
@@ -958,6 +961,7 @@ def main() -> int:
         print("Repository remains unchanged.")
         print("Baseline validation passed.")
         return 0
+
     print()
     print(f"Selected improvement: {title}")
     print(f"Target files: {target_files}")

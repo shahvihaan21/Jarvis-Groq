@@ -2,9 +2,13 @@ name: Daily Improvement
 
 on:
   schedule:
-    - cron: "0 9 * * *"
-      timezone: "Asia/Kolkata"
+    # Daily at 03:30 UTC (UTC)
+    - cron: "30 3 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/daily-improvement.yml"
 
 permissions:
   contents: write
@@ -17,7 +21,6 @@ jobs:
   improve:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,7 +43,7 @@ jobs:
           git config user.name "jarvis-daily-bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Run daily improvement engine
+      - name: Run daily improvement engine and push to main
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
         run: python scripts/daily_improvement.py
@@ -48,9 +51,9 @@ jobs:
       - name: Summary
         if: always()
         run: |
-            echo "### Daily Improvement run" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Trigger: ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Time: $(date -u)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Latest commit: $(git log -1 --pretty='%h %s')" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Sync state: $(git status -sb | head -1)" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Daily Improvement run"
+            echo ""
+            echo "- Latest commit: $(git log -1 --pretty='%h %s')"
+            echo "- Sync state: $(git status -sb | head -1)"
+          } >> "$GITHUB_STEP_SUMMARY"

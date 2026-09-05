@@ -2,8 +2,16 @@ name: Daily Improvement
 
 on:
   schedule:
-    - cron: "30 3 * * *" # 09:00 IST / 03:30 UTC
+    # 03:30 UTC = 09:00 IST
+    - cron: "30 3 * * *"
+
   workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/daily-improvement.yml"
 
 permissions:
   contents: write
@@ -14,96 +22,110 @@ concurrency:
 
 jobs:
   improve:
+    name: Autonomous Repository Improvement
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout repository
+      # ---------------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------------
+
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           ref: main
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Set up Python
+      # ---------------------------------------------------------------
+      # Python
+      # ---------------------------------------------------------------
+
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
+
+      # ---------------------------------------------------------------
+      # Dependencies
+      # ---------------------------------------------------------------
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+          pip install -r requirements.txt
           pip install pytest
 
-      - name: Configure git
+      # ---------------------------------------------------------------
+      # Git configuration
+      # ---------------------------------------------------------------
+
+      - name: Configure Git
         run: |
           git config user.name "jarvis-daily-bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Save clean baseline
+      # ---------------------------------------------------------------
+      # Verify branch
+      # ---------------------------------------------------------------
+
+      - name: Verify main branch
         run: |
-          git status --short
-          git rev-parse HEAD > /tmp/baseline_commit
+          CURRENT_BRANCH="$(git branch --show-current)"
+
+          echo "Current branch: $CURRENT_BRANCH"
+
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "ERROR: Workflow is not running on main."
+            exit 1
+          fi
+
+      # ---------------------------------------------------------------
+      # Run autonomous engine
+      # ---------------------------------------------------------------
 
       - name: Run daily improvement engine
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/daily_improvement.py
 
-      - name: Check for changes
-        id: changes
-        run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes were produced."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Changes detected:"
-            git status --short
-          fi
+      # ---------------------------------------------------------------
+      # Final repository state
+      # ---------------------------------------------------------------
 
-      - name: Run tests
-        if: steps.changes.outputs.changed == 'true'
-        env:
-          PYTHONPATH: ${{ github.workspace }}/backend
-        run: |
-          pytest -q
-
-      - name: Commit validated changes
-        if: steps.changes.outputs.changed == 'true'
-        run: |
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "Nothing to commit."
-            exit 0
-          fi
-
-          git commit -m "chore: daily automated improvement"
-          git push origin main
-
-      - name: Roll back failed improvement
-        if: failure()
-        run: |
-          echo "Daily improvement failed. Restoring repository state."
-
-          git reset --hard "$(cat /tmp/baseline_commit)"
-          git clean -fd
-
-          echo "Repository restored to:"
-          git log -1 --oneline
-
-      - name: Summary
+      - name: Verify repository state
         if: always()
         run: |
-          echo "### Daily Improvement Run" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Trigger: ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Time (UTC): $(date -u)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Branch: main" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Final commit: $(git log -1 --pretty='%h %s')" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Working tree: $(git status --short)" >> "$GITHUB_STEP_SUMMARY"
+          echo "=========================================="
+          echo "Final repository state"
+          echo "=========================================="
+
+          git branch --show-current
+          git log -1 --pretty="Commit: %h %s"
+          git status --short
+
+      # ---------------------------------------------------------------
+      # GitHub Actions summary
+      # ---------------------------------------------------------------
+
+      - name: Write workflow summary
+        if: always()
+        run: |
+          {
+            echo "## Jarvis Daily Improvement"
+            echo ""
+            echo "**Branch:** main"
+            echo ""
+            echo "**Latest commit:**"
+            git log -1 --pretty="- %h %s"
+            echo ""
+            echo "**Repository status:**"
+            echo '```'
+            git status --short
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -946,25 +946,25 @@ def main() -> int:
         print("Check-only mode complete.")
         return 0
 
-# ------------------------------------------------------------------
-# Select improvement
-# ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Select improvement
+    # ------------------------------------------------------------------
 
-title, target_files = execute_catalog_improvement()
+    title, target_files = execute_catalog_improvement()
 
-if not title:
+    if not title:
+        print()
+        print("No unapplied safe improvement is currently available.")
+        print("Repository remains unchanged.")
+        print("Baseline validation passed.")
+        return 0
     print()
-    print("No unapplied safe improvement is currently available.")
-    print("Repository remains unchanged.")
-    print("Baseline validation passed.")
-    return 0
-print()
-print(f"Selected improvement: {title}")
-print(f"Target files: {target_files}")
+    print(f"Selected improvement: {title}")
+    print(f"Target files: {target_files}")
 
-# ------------------------------------------------------------------
-# Validate improvement
-# ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Validate improvement
+    # ------------------------------------------------------------------
 
     try:
         validate_improvement(target_files)

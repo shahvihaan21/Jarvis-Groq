@@ -37,17 +37,16 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-    persist-credentials: true
-# ---------------------------------------------------------------
-# Python
-# ---------------------------------------------------------------
+          persist-credentials: true
+      # ---------------------------------------------------------------
+      # Python
+      # ---------------------------------------------------------------
 
-- name: Set up Python 3.12
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
       # ---------------------------------------------------------------
       # Dependencies
       # ---------------------------------------------------------------
@@ -67,45 +66,45 @@ jobs:
           git config user.name "jarvis-daily-bot"
           git config user.email "actions@users.noreply.github.com"
 
-# ---------------------------------------------------------------
-# Verify branch
-# ---------------------------------------------------------------
+      # ---------------------------------------------------------------
+      # Verify branch
+      # ---------------------------------------------------------------
 
-- name: Verify main branch
-  run: |
-    CURRENT_BRANCH="$(git branch --show-current)"
-    echo "Current branch: $CURRENT_BRANCH"
-    if [ "$CURRENT_BRANCH" != "main" ]; then
-      echo "ERROR: Workflow is not running on main."
-      exit 1
-    fi
-# ---------------------------------------------------------------
-# Run autonomous engine
-# ---------------------------------------------------------------
+      - name: Verify main branch
+        run: |
+          CURRENT_BRANCH="$(git branch --show-current)"
+          echo "Current branch: $CURRENT_BRANCH"
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "ERROR: Workflow is not running on main."
+            exit 1
+          fi
+      # ---------------------------------------------------------------
+      # Run autonomous engine
+      # ---------------------------------------------------------------
 
-- name: Run daily improvement engine
-  id: improvement
-  env:
-    PYTHONPATH: ${{ github.workspace }}/backend
-    PYTHONUNBUFFERED: "1"
-  run: |
-    set -o pipefail
-    python scripts/daily_improvement.py 2>&1 | tee daily-improvement-output.log
-# ---------------------------------------------------------------
-# Final repository state
-# ---------------------------------------------------------------
+      - name: Run daily improvement engine
+        id: improvement
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -o pipefail
+          python scripts/daily_improvement.py 2>&1 | tee daily-improvement-output.log
+      # ---------------------------------------------------------------
+      # Final repository state
+      # ---------------------------------------------------------------
 
-- name: Verify repository state
-  if: always()
-  run: |
-    git branch --show-current
-    git log -1 --pretty="Commit: %h %s"
-    git status --short
-# ---------------------------------------------------------------
-# GitHub Actions summary
-# ---------------------------------------------------------------
+      - name: Verify repository state
+        if: always()
+        run: |
+          git branch --show-current
+          git log -1 --pretty="Commit: %h %s"
+          git status --short
+      # ---------------------------------------------------------------
+      # GitHub Actions summary
+      # ---------------------------------------------------------------
 
-- name: Write workflow summary
+      - name: Write workflow summary
         if: always()
         run: |
           {

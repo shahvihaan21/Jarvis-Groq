@@ -68,3 +68,32 @@ def test_tools_api_post_execute():
     data = response.json()
     assert data["status"] == "success"
     assert data["result"]["result"] == 100.0
+        
+def test_calculator_division_by_zero():
+    with pytest.raises(ToolExecutionError):
+        execute_tool(
+            "calculator",
+            {"expression": "10 / 0"},
+        )
+
+
+def test_repository_search_empty_query():
+    with pytest.raises(
+        ToolExecutionError,
+        match="Search query must be between 1 and 100 characters",
+    ):
+        execute_tool(
+            "repository_search",
+            {"query": ""},
+        )
+
+
+def test_repository_search_query_too_long():
+    with pytest.raises(
+        ToolExecutionError,
+        match="Search query must be between 1 and 100 characters",
+    ):
+        execute_tool(
+            "repository_search",
+            {"query": "x" * 101},
+        )

@@ -2,13 +2,8 @@ name: Daily Improvement
 
 on:
   schedule:
-    # Daily at 03:30 UTC (UTC)
-    - cron: "30 3 * * *"
+    - cron: "30 3 * * *" # 09:00 IST / 03:30 UTC
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/daily-improvement.yml"
 
 permissions:
   contents: write
@@ -20,22 +15,27 @@ concurrency:
 jobs:
   improve:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
           pip install pytest
 
       - name: Configure git
@@ -43,17 +43,67 @@ jobs:
           git config user.name "jarvis-daily-bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Run daily improvement engine and push to main
+      - name: Save clean baseline
+        run: |
+          git status --short
+          git rev-parse HEAD > /tmp/baseline_commit
+
+      - name: Run daily improvement engine
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
-        run: python scripts/daily_improvement.py
+        run: |
+          python scripts/daily_improvement.py
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes were produced."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected:"
+            git status --short
+          fi
+
+      - name: Run tests
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: |
+          pytest -q
+
+      - name: Commit validated changes
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: daily automated improvement"
+          git push origin main
+
+      - name: Roll back failed improvement
+        if: failure()
+        run: |
+          echo "Daily improvement failed. Restoring repository state."
+
+          git reset --hard "$(cat /tmp/baseline_commit)"
+          git clean -fd
+
+          echo "Repository restored to:"
+          git log -1 --oneline
 
       - name: Summary
         if: always()
         run: |
-          {
-            echo "### Daily Improvement run"
-            echo ""
-            echo "- Latest commit: $(git log -1 --pretty='%h %s')"
-            echo "- Sync state: $(git status -sb | head -1)"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "### Daily Improvement Run" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: ${{ github.event_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Time (UTC): $(date -u)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: main" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Final commit: $(git log -1 --pretty='%h %s')" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Working tree: $(git status --short)" >> "$GITHUB_STEP_SUMMARY"

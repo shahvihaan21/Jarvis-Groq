@@ -4,9 +4,12 @@ on:
   schedule:
     # Daily at 03:30 UTC (09:00 IST)
     - cron: "30 3 * * *"
+
   workflow_dispatch:
+
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - ".github/workflows/daily-improvement.yml"
 
@@ -19,19 +22,35 @@ concurrency:
 
 jobs:
   improve:
+    name: Autonomous Repository Improvement
     runs-on: ubuntu-latest
+
     timeout-minutes: 20
+
     steps:
-      - name: Checkout repository
+      # ---------------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------------
+
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           ref: main
-          persist-credentials: true
-      - name: Set up Python
+          fetch-depth: 0
+    persist-credentials: true
+# ---------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------
+
+- name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+
+      # ---------------------------------------------------------------
+      # Dependencies
+      # ---------------------------------------------------------------
 
       - name: Install dependencies
         run: |
@@ -39,23 +58,58 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Configure git
+      # ---------------------------------------------------------------
+      # Git configuration
+      # ---------------------------------------------------------------
+
+      - name: Configure Git
         run: |
           git config user.name "jarvis-daily-bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Run daily improvement engine and push to main
-        id: improvement
-        env:
-          PYTHONPATH: ${{ github.workspace }}/backend
-        run: |
-          set -o pipefail
-          python scripts/daily_improvement.py 2>&1 | tee daily-improvement-output.log
-      - name: Summary
+# ---------------------------------------------------------------
+# Verify branch
+# ---------------------------------------------------------------
+
+- name: Verify main branch
+  run: |
+    CURRENT_BRANCH="$(git branch --show-current)"
+    echo "Current branch: $CURRENT_BRANCH"
+    if [ "$CURRENT_BRANCH" != "main" ]; then
+      echo "ERROR: Workflow is not running on main."
+      exit 1
+    fi
+# ---------------------------------------------------------------
+# Run autonomous engine
+# ---------------------------------------------------------------
+
+- name: Run daily improvement engine
+  id: improvement
+  env:
+    PYTHONPATH: ${{ github.workspace }}/backend
+    PYTHONUNBUFFERED: "1"
+  run: |
+    set -o pipefail
+    python scripts/daily_improvement.py 2>&1 | tee daily-improvement-output.log
+# ---------------------------------------------------------------
+# Final repository state
+# ---------------------------------------------------------------
+
+- name: Verify repository state
+  if: always()
+  run: |
+    git branch --show-current
+    git log -1 --pretty="Commit: %h %s"
+    git status --short
+# ---------------------------------------------------------------
+# GitHub Actions summary
+# ---------------------------------------------------------------
+
+- name: Write workflow summary
         if: always()
         run: |
           {
-            echo "### Daily Improvement run"
+            echo "## Jarvis Daily Improvement"
             echo ""
             echo "- Result: ${{ steps.improvement.outcome }}"
             echo "- Engine report:"
@@ -64,8 +118,12 @@ jobs:
             else
               echo "  Engine output was not produced."
             fi
+            echo "- Branch: $(git branch --show-current)"
             echo "- Latest commit: $(git log -1 --pretty='%h %s')"
-            echo "- Final repository state: $(git status -sb | head -1)"
+            echo "- Final repository state:"
+            echo '```'
+            git status --short
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "${{ steps.improvement.outcome }}" != "success" ]; then

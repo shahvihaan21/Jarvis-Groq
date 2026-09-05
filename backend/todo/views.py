@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import datetime
 import uuid
 
 from django.conf import settings
@@ -171,6 +172,7 @@ def health(request):
     return JsonResponse({
         "status": "ok",
         "service": "jarvis-groq",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "provider": provider_name,
         "provider_configured": has_groq_key if provider_name == "groq" else True,
     })

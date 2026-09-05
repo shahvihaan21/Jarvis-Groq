@@ -120,7 +120,7 @@ CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"json": {"()": "pythonjsonlogger.jsonlogger.JsonFormatter"}},
+    "formatters": {"json": {"()": "pythonjsonlogger.json.JsonFormatter"}},
     "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "json"}},
     "loggers": {"todo": {"handlers": ["console"], "level": "INFO", "propagate": False}},
 }
@@ -147,3 +147,8 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Browser security hardening
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+

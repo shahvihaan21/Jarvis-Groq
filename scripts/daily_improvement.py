@@ -1,16 +1,16 @@
+"""
+Jarvis-Groq Autonomous Daily Improvement Engine.
 
-"""Autonomous Daily Improvement Engine for Jarvis-Groq.
-
-Executes one small, high-quality, verified improvement on the repository.
-
-Safety model:
-- Requires a clean working tree before making changes.
-- Runs baseline validation before every improvement.
-- Applies exactly one catalog improvement.
-- Validates syntax, security, limits, Django checks and pytest.
-- Automatically restores the exact baseline if validation fails.
-- Failed improvements are rejected cleanly and do not push.
-- Only verified improvements are committed and pushed.
+Design goals:
+- Operates directly on main.
+- One verified improvement per run.
+- Never pushes an unvalidated change.
+- Automatically rolls back failed changes.
+- Skips already-applied improvements.
+- Keeps an improvement history.
+- Performs baseline and post-change validation.
+- Never modifies GitHub workflow files.
+- Never modifies protected deployment/secrets files.
 """
 
 from __future__ import annotations
@@ -18,8 +18,6 @@ from __future__ import annotations
 import argparse
 import ast
 import datetime
-import json
-import os
 import re
 import subprocess
 import sys
@@ -28,8 +26,8 @@ from typing import Callable
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
 LOG_FILE = ROOT / ".github" / "codex" / "improvement-log.md"
-RULES_FILE = ROOT / ".github" / "codex" / "daily-improvement.md"
 
 MAX_CHANGED_FILES = 5
 MAX_CHANGED_LINES = 150
@@ -41,6 +39,11 @@ PROTECTED_PATHS = {
     "runtime.txt",
     "vercel.json",
 }
+
+PROTECTED_PREFIXES = (
+    ".github/workflows/",
+    ".git/",
+)
 
 SECRET_PATTERNS = [
     re.compile(r"gsk_[a-zA-Z0-9]{20,}"),
@@ -56,314 +59,385 @@ SECRET_PATTERNS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Git helpers
+# ---------------------------------------------------------------------------
+
 def run_command(
     args: list[str],
-    cwd: Path = ROOT,
+    *,
     check: bool = True,
-    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Execute a command without shell interpretation."""
     return subprocess.run(
         args,
-        cwd=cwd,
+        cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=check,
-        env=env,
     )
 
 
-def get_git_status() -> str:
-    """Return porcelain repository status."""
-    return run_command(
+def repository_is_clean() -> bool:
+    result = run_command(
         ["git", "status", "--porcelain"],
-        check=True,
-    ).stdout.strip()
+        check=False,
+    )
+    return not result.stdout.strip()
 
 
-def get_current_commit() -> str:
-    """Return the current HEAD SHA."""
-    return run_command(
+def rollback_to_baseline(baseline_commit: str) -> bool:
+    """
+    Restore the repository to the exact commit that existed
+    before the improvement was attempted.
+    """
+    print(f"Rolling back to baseline {baseline_commit}...")
+
+    reset = run_command(
+        ["git", "reset", "--hard", baseline_commit],
+        check=False,
+    )
+
+    clean = run_command(
+        ["git", "clean", "-fd"],
+        check=False,
+    )
+
+    head = run_command(
         ["git", "rev-parse", "HEAD"],
-        check=True,
-    ).stdout.strip()
+        check=False,
+    )
 
+    status = run_command(
+        ["git", "status", "--porcelain"],
+        check=False,
+    )
 
-def ensure_clean_worktree() -> None:
-    """Require a clean repository before autonomous modification."""
-    status = get_git_status()
+    success = (
+        reset.returncode == 0
+        and clean.returncode == 0
+        and head.stdout.strip() == baseline_commit
+        and not status.stdout.strip()
+    )
 
-    if status:
-        raise RuntimeError(
-            "Repository is not clean. "
-            "Autonomous improvement aborted to protect existing changes:\n"
-            f"{status}"
+    if success:
+        print("Rollback completed successfully.")
+    else:
+        print(
+            "CRITICAL: rollback verification failed.",
+            file=sys.stderr,
         )
 
+    return success
 
-def rollback(baseline_commit: str) -> bool:
-    """Restore the repository to the exact baseline commit."""
-    print(f"Rolling back to baseline {baseline_commit[:12]}...")
 
-    try:
-        # Restore all tracked files to the exact baseline.
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+def run_test_suite() -> None:
+    """
+    Run Django checks and the complete pytest suite.
+    """
+    manage_py = ROOT / "backend" / "manage.py"
+
+    if manage_py.exists():
         result = run_command(
-            ["git", "reset", "--hard", baseline_commit],
+            [sys.executable, str(manage_py), "check"],
             check=False,
         )
 
         if result.returncode != 0:
-            print(
-                f"Git reset failed: "
-                f"{result.stderr.strip() or result.stdout.strip()}",
-                file=sys.stderr,
-            )
-            return False
-
-        # Remove untracked files created by the improvement.
-        clean_result = run_command(
-            ["git", "clean", "-fd"],
-            check=False,
-        )
-
-        if clean_result.returncode != 0:
-            print(
-                f"Git clean failed: "
-                f"{clean_result.stderr.strip() or clean_result.stdout.strip()}",
-                file=sys.stderr,
-            )
-            return False
-
-        # Verify rollback actually restored the repository.
-        final_commit = get_current_commit()
-        final_status = get_git_status()
-
-        if final_commit != baseline_commit:
-            print(
-                "Rollback verification failed: HEAD does not match baseline.",
-                file=sys.stderr,
-            )
-            return False
-
-        if final_status:
-            print(
-                "Rollback verification failed: working tree is not clean:\n"
-                f"{final_status}",
-                file=sys.stderr,
-            )
-            return False
-
-        print("Rollback completed and verified successfully.")
-        return True
-
-    except Exception as exc:
-        print(f"Rollback failed unexpectedly: {exc}", file=sys.stderr)
-        return False
-
-
-def check_syntax(py_files: list[str]) -> None:
-    """Validate Python syntax for modified Python files."""
-    for file_path in py_files:
-        full_path = ROOT / file_path
-
-        if full_path.exists() and full_path.suffix == ".py":
-            ast.parse(full_path.read_text(encoding="utf-8"))
-
-
-def run_test_suite() -> None:
-    """Run Django system checks and the complete pytest suite."""
-    manage_py = ROOT / "backend" / "manage.py"
-
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "backend")
-
-    if manage_py.exists():
-        chk = run_command(
-            [sys.executable, str(manage_py), "check"],
-            check=False,
-            env=env,
-        )
-
-        if chk.returncode != 0:
             raise RuntimeError(
                 "Django system check failed:\n"
-                f"{chk.stderr.strip() or chk.stdout.strip()}"
+                + (result.stderr.strip() or result.stdout.strip())
             )
 
-    proc = run_command(
+    result = run_command(
         [sys.executable, "-m", "pytest", "-q"],
         check=False,
-        env=env,
     )
 
-    if proc.returncode != 0:
+    if result.returncode != 0:
         raise RuntimeError(
             "Pytest failed:\n"
-            f"{proc.stdout.strip() or proc.stderr.strip()}"
+            + (result.stdout.strip() or result.stderr.strip())
+        )
+
+
+def check_syntax(files: list[str]) -> None:
+    """
+    Parse every modified Python file using the AST parser.
+    """
+    for file_name in files:
+        path = ROOT / file_name
+
+        if not path.exists():
+            continue
+
+        if path.suffix != ".py":
+            continue
+
+        ast.parse(
+            path.read_text(encoding="utf-8"),
+            filename=str(path),
         )
 
 
 def verify_security_and_limits(changed_files: list[str]) -> None:
-    """Ensure changes stay within safety and size limits."""
-    if len(changed_files) > MAX_CHANGED_FILES:
+    """
+    Reject dangerous or excessively large modifications.
+    """
+    unique_files = sorted(set(changed_files))
+
+    if len(unique_files) > MAX_CHANGED_FILES:
         raise RuntimeError(
-            f"Exceeded file limit: "
-            f"{len(changed_files)} > {MAX_CHANGED_FILES}"
+            f"Too many changed files: "
+            f"{len(unique_files)} > {MAX_CHANGED_FILES}"
         )
 
-    for file_name in changed_files:
-        if file_name in PROTECTED_PATHS:
+    for file_name in unique_files:
+        normalized = file_name.replace("\\", "/")
+
+        if normalized in PROTECTED_PATHS:
             raise RuntimeError(
-                f"Cannot modify protected file: {file_name}"
+                f"Protected file cannot be modified: {normalized}"
             )
 
-        if file_name.startswith(".github/workflows/"):
+        if any(
+            normalized.startswith(prefix)
+            for prefix in PROTECTED_PREFIXES
+        ):
             raise RuntimeError(
-                f"Cannot modify workflow files: {file_name}"
+                f"Protected path cannot be modified: {normalized}"
             )
 
-    diff_proc = run_command(
-        ["git", "diff", "--", *changed_files],
+    diff = run_command(
+        ["git", "diff", "--", *unique_files],
         check=False,
     )
 
-    diff_text = diff_proc.stdout
+    diff_text = diff.stdout
 
-    total_lines = len(
-        [
-            line
-            for line in diff_text.splitlines()
-            if line.startswith(("+", "-"))
-            and not line.startswith(("+++", "---"))
-        ]
-    )
+    changed_lines = [
+        line
+        for line in diff_text.splitlines()
+        if line.startswith(("+", "-"))
+        and not line.startswith(("+++", "---"))
+    ]
 
-    if total_lines > MAX_CHANGED_LINES:
+    if len(changed_lines) > MAX_CHANGED_LINES:
         raise RuntimeError(
-            f"Exceeded line limit: "
-            f"{total_lines} > {MAX_CHANGED_LINES}"
+            f"Too many changed lines: "
+            f"{len(changed_lines)} > {MAX_CHANGED_LINES}"
         )
 
     for pattern in SECRET_PATTERNS:
         if pattern.search(diff_text):
             raise RuntimeError(
-                "Secret or credential detected in diff"
+                "Possible secret or credential detected in diff."
             )
 
 
-def apply_deprecation_warning_fix() -> tuple[str, list[str]]:
-    """Improvement 1: Resolve JsonFormatter deprecation warning."""
-    settings_file = ROOT / "backend" / "ai" / "settings.py"
-
-    content = settings_file.read_text(encoding="utf-8")
-
-    target = '"()": "pythonjsonlogger.jsonlogger.JsonFormatter"'
-    replacement = '"()": "pythonjsonlogger.json.JsonFormatter"'
-
-    if target in content:
-        settings_file.write_text(
-            content.replace(target, replacement),
-            encoding="utf-8",
-        )
-
-        return (
-            "Upgrade JsonFormatter import in backend/ai/settings.py "
-            "to eliminate deprecation warning",
-            ["backend/ai/settings.py"],
-        )
-
-    return "", []
+def validate_improvement(files: list[str]) -> None:
+    check_syntax(files)
+    verify_security_and_limits(files)
+    run_test_suite()
 
 
-def apply_health_endpoint_metadata() -> tuple[str, list[str]]:
-    """Improvement 2: Add UTC ISO timestamp to health check."""
-    views_file = ROOT / "backend" / "todo" / "views.py"
+# ---------------------------------------------------------------------------
+# Improvement helpers
+# ---------------------------------------------------------------------------
 
-    content = views_file.read_text(encoding="utf-8")
+def read_file(path: Path) -> str:
+    if not path.exists():
+        return ""
 
-    if (
-        "from django.utils import timezone" not in content
-        and "datetime.timezone.utc" not in content
-    ):
-        if "import uuid" in content:
-            content = content.replace(
-                "import uuid",
-                "import datetime\nimport uuid",
-            )
-
-        if (
-            '"status": "ok",' in content
-            and '"timestamp":' not in content
-        ):
-            content = content.replace(
-                '"status": "ok",\n'
-                '        "service": "jarvis-groq",',
-                '"status": "ok",\n'
-                '        "service": "jarvis-groq",\n'
-                '        "timestamp": '
-                'datetime.datetime.now('
-                'datetime.timezone.utc'
-                ').isoformat(),',
-            )
-
-            views_file.write_text(
-                content,
-                encoding="utf-8",
-            )
-
-            return (
-                "Include UTC timestamp in /api/health/ readiness check",
-                ["backend/todo/views.py"],
-            )
-
-    return "", []
+    return path.read_text(encoding="utf-8")
 
 
-def apply_security_headers_hardening() -> tuple[str, list[str]]:
-    """Improvement 3: Harden browser security headers."""
-    settings_file = ROOT / "backend" / "ai" / "settings.py"
+def write_if_changed(path: Path, content: str) -> bool:
+    old = read_file(path)
 
-    content = settings_file.read_text(encoding="utf-8")
+    if old == content:
+        return False
 
-    if "SECURE_CONTENT_TYPE_NOSNIFF" not in content:
-        target = (
-            'DEFAULT_AUTO_FIELD = '
-            '"django.db.models.BigAutoField"'
-        )
-
-        addition = (
-            'DEFAULT_AUTO_FIELD = '
-            '"django.db.models.BigAutoField"\n\n'
-            "# Browser security hardening\n"
-            "SECURE_CONTENT_TYPE_NOSNIFF = True\n"
-            "SECURE_BROWSER_XSS_FILTER = True\n"
-        )
-
-        if target in content:
-            settings_file.write_text(
-                content.replace(target, addition),
-                encoding="utf-8",
-            )
-
-            return (
-                "Harden HTTP security headers with "
-                "nosniff and xss-filter settings",
-                ["backend/ai/settings.py"],
-            )
-
-    return "", []
+    path.write_text(content, encoding="utf-8")
+    return True
 
 
-def apply_tool_edge_case_tests() -> tuple[str, list[str]]:
-    """Improvement 4: Add valid edge-case tests for tools."""
-    tests_file = ROOT / "tests" / "test_tools.py"
+def add_test_if_missing(
+    tests_file: Path,
+    test_name: str,
+    test_body: str,
+) -> bool:
+    content = read_file(tests_file)
 
-    content = tests_file.read_text(encoding="utf-8")
+    if not content:
+        return False
 
-    if "test_calculator_division_by_zero" not in content:
-        addition = """
-        
+    if test_name in content:
+        return False
+
+    addition = (
+        "\n\n"
+        f"{test_body.rstrip()}\n"
+    )
+
+    return write_if_changed(
+        tests_file,
+        content.rstrip() + addition,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 1
+# ---------------------------------------------------------------------------
+
+def improvement_deprecation_warning() -> tuple[str, list[str]]:
+    path = ROOT / "backend" / "ai" / "settings.py"
+    content = read_file(path)
+
+    target = '"()": "pythonjsonlogger.json.JsonFormatter"'
+
+    if "pythonjsonlogger.json.JsonFormatter" in content:
+        return "", []
+
+    if "pythonjsonlogger.jsonlogger.JsonFormatter" not in content:
+        return "", []
+
+    new_content = content.replace(
+        '"()": "pythonjsonlogger.jsonlogger.JsonFormatter"',
+        target,
+    )
+
+    if new_content == content:
+        return "", []
+
+    if not write_if_changed(path, new_content):
+        return "", []
+
+    return (
+        "Fix python-json-logger deprecated JsonFormatter import",
+        ["backend/ai/settings.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 2
+# ---------------------------------------------------------------------------
+
+def improvement_health_timestamp() -> tuple[str, list[str]]:
+    path = ROOT / "backend" / "todo" / "views.py"
+    content = read_file(path)
+
+    if not content:
+        return "", []
+
+    if '"timestamp":' in content:
+        return "", []
+
+    if '"status": "ok"' not in content:
+        return "", []
+
+    if "import datetime" not in content:
+        content = "import datetime\n" + content
+
+    marker = '"status": "ok",'
+
+    replacement = (
+        '"status": "ok",\n'
+        '        "timestamp": '
+        'datetime.datetime.now(datetime.timezone.utc).isoformat(),'
+    )
+
+    new_content = content.replace(
+        marker,
+        replacement,
+        1,
+    )
+
+    if new_content == content:
+        return "", []
+
+    if not write_if_changed(path, new_content):
+        return "", []
+
+    return (
+        "Add UTC timestamp to health endpoint",
+        ["backend/todo/views.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 3
+# ---------------------------------------------------------------------------
+
+def improvement_security_headers() -> tuple[str, list[str]]:
+    path = ROOT / "backend" / "ai" / "settings.py"
+    content = read_file(path)
+
+    if not content:
+        return "", []
+
+    if "SECURE_CONTENT_TYPE_NOSNIFF" in content:
+        return "", []
+
+    marker = 'DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"'
+
+    if marker not in content:
+        return "", []
+
+    addition = (
+        marker
+        + "\n\n"
+        + "# Browser security hardening\n"
+        + "SECURE_CONTENT_TYPE_NOSNIFF = True\n"
+        + "SECURE_BROWSER_XSS_FILTER = True\n"
+    )
+
+    new_content = content.replace(
+        marker,
+        addition,
+        1,
+    )
+
+    if not write_if_changed(path, new_content):
+        return "", []
+
+    return (
+        "Harden Django browser security headers",
+        ["backend/ai/settings.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 4
+# ---------------------------------------------------------------------------
+
+def improvement_tool_edge_cases() -> tuple[str, list[str]]:
+    path = ROOT / "tests" / "test_tools.py"
+
+    if not path.exists():
+        return "", []
+
+    if "test_calculator_division_by_zero" in read_file(path):
+        return "", []
+
+    content = read_file(path)
+
+    imports = ""
+
+    if "import pytest" not in content:
+        imports += "import pytest\n"
+
+    if "ToolExecutionError" not in content:
+        imports += "from todo.tools import ToolExecutionError\n"
+
+    if imports:
+        content = imports + "\n" + content
+
+    addition = """
 def test_calculator_division_by_zero():
     with pytest.raises(ToolExecutionError):
         execute_tool(
@@ -394,48 +468,353 @@ def test_repository_search_query_too_long():
         )
 """
 
-        tests_file.write_text(
-            content.rstrip() + addition,
-            encoding="utf-8",
-        )
+    final_content = content.rstrip() + "\n\n" + addition.strip() + "\n"
+    if not write_if_changed(path, final_content):
+        return "", []
 
-        return (
-            "Add valid edge-case unit tests for calculator "
-            "division by zero and repository search validation",
-            ["tests/test_tools.py"],
+    return (
+        "Add tool boundary tests for calculator and repository search",
+        ["tests/test_tools.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 5
+# ---------------------------------------------------------------------------
+
+def improvement_repository_search_whitespace() -> tuple[str, list[str]]:
+    path = ROOT / "tests" / "test_tools.py"
+
+    if not path.exists():
+        return "", []
+
+    test = """
+def test_repository_search_whitespace_query():
+    with pytest.raises(
+        ToolExecutionError,
+        match="Search query must be between 1 and 100 characters",
+    ):
+        execute_tool(
+            "repository_search",
+            {"query": "   "},
         )
+"""
+
+    if "test_repository_search_whitespace_query" in read_file(path):
+        return "", []
+
+    add_test_if_missing(
+        path,
+        "test_repository_search_whitespace_query",
+        test,
+    )
+
+    return (
+        "Add whitespace-only repository search validation test",
+        ["tests/test_tools.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 6
+# ---------------------------------------------------------------------------
+
+def improvement_calculator_invalid_expression() -> tuple[str, list[str]]:
+    path = ROOT / "tests" / "test_tools.py"
+
+    if not path.exists():
+        return "", []
+
+    test = """
+def test_calculator_invalid_expression():
+    with pytest.raises(ToolExecutionError):
+        execute_tool(
+            "calculator",
+            {"expression": "this is not valid math"},
+        )
+"""
+
+    if "test_calculator_invalid_expression" in read_file(path):
+        return "", []
+
+    add_test_if_missing(
+        path,
+        "test_calculator_invalid_expression",
+        test,
+    )
+
+    return (
+        "Add calculator invalid-expression regression test",
+        ["tests/test_tools.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 7
+# ---------------------------------------------------------------------------
+
+def improvement_calculator_empty_expression() -> tuple[str, list[str]]:
+    path = ROOT / "tests" / "test_tools.py"
+
+    if not path.exists():
+        return "", []
+
+    test = """
+def test_calculator_empty_expression():
+    with pytest.raises(ToolExecutionError):
+        execute_tool(
+            "calculator",
+            {"expression": ""},
+        )
+"""
+
+    if "test_calculator_empty_expression" in read_file(path):
+        return "", []
+
+    add_test_if_missing(
+        path,
+        "test_calculator_empty_expression",
+        test,
+    )
+
+    return (
+        "Add calculator empty-expression regression test",
+        ["tests/test_tools.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 8
+# ---------------------------------------------------------------------------
+
+def improvement_tool_missing_expression() -> tuple[str, list[str]]:
+    path = ROOT / "tests" / "test_tools.py"
+
+    if not path.exists():
+        return "", []
+
+    test = """
+def test_calculator_missing_expression():
+    with pytest.raises(ToolExecutionError):
+        execute_tool(
+            "calculator",
+            {},
+        )
+"""
+
+    if "test_calculator_missing_expression" in read_file(path):
+        return "", []
+
+    add_test_if_missing(
+        path,
+        "test_calculator_missing_expression",
+        test,
+    )
+
+    return (
+        "Add calculator missing-input regression test",
+        ["tests/test_tools.py"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 9
+# ---------------------------------------------------------------------------
+
+def improvement_health_endpoint_test() -> tuple[str, list[str]]:
+    path = ROOT / "tests" / "test_tools.py"
+
+    if not path.exists():
+        return "", []
+
+    # Only apply this if the project already has Django test infrastructure.
+    if "django.test" not in read_file(path):
+        return "", []
 
     return "", []
 
 
-CATALOG_IMPROVEMENTS: list[
-    Callable[[], tuple[str, list[str]]]
-] = [
-    apply_deprecation_warning_fix,
-    apply_health_endpoint_metadata,
-    apply_security_headers_hardening,
-    apply_tool_edge_case_tests,
+# ---------------------------------------------------------------------------
+# Improvement 10
+# ---------------------------------------------------------------------------
+
+def improvement_python_cache_ignore() -> tuple[str, list[str]]:
+    path = ROOT / ".gitignore"
+
+    content = read_file(path)
+
+    if not content:
+        return "", []
+
+    required = [
+        "__pycache__/",
+        "*.py[cod]",
+    ]
+
+    missing = [
+        item
+        for item in required
+        if item not in content
+    ]
+
+    if not missing:
+        return "", []
+
+    new_content = content.rstrip() + "\n\n# Python cache\n"
+
+    for item in missing:
+        new_content += item + "\n"
+
+    if not write_if_changed(path, new_content):
+        return "", []
+
+    return (
+        "Improve Python cache exclusion in gitignore",
+        [".gitignore"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 11
+# ---------------------------------------------------------------------------
+
+def improvement_test_cache_ignore() -> tuple[str, list[str]]:
+    path = ROOT / ".gitignore"
+
+    content = read_file(path)
+
+    if not content:
+        return "", []
+
+    if ".pytest_cache/" in content:
+        return "", []
+
+    new_content = (
+        content.rstrip()
+        + "\n\n# Pytest cache\n"
+        + ".pytest_cache/\n"
+    )
+
+    if not write_if_changed(path, new_content):
+        return "", []
+
+    return (
+        "Exclude pytest cache artifacts from repository",
+        [".gitignore"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement 12
+# ---------------------------------------------------------------------------
+
+def improvement_django_cache_ignore() -> tuple[str, list[str]]:
+    path = ROOT / ".gitignore"
+
+    content = read_file(path)
+
+    if not content:
+        return "", []
+
+    if ".mypy_cache/" in content:
+        return "", []
+
+    new_content = (
+        content.rstrip()
+        + "\n\n# Python tooling cache\n"
+        + ".mypy_cache/\n"
+    )
+
+    if not write_if_changed(path, new_content):
+        return "", []
+
+    return (
+        "Exclude Python tooling cache artifacts",
+        [".gitignore"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Improvement catalog
+# ---------------------------------------------------------------------------
+
+CATALOG_IMPROVEMENTS: list[Callable[[], tuple[str, list[str]]]] = [
+    improvement_deprecation_warning,
+    improvement_health_timestamp,
+    improvement_security_headers,
+    improvement_tool_edge_cases,
+    improvement_repository_search_whitespace,
+    improvement_calculator_invalid_expression,
+    improvement_calculator_empty_expression,
+    improvement_tool_missing_expression,
+    improvement_health_endpoint_test,
+    improvement_python_cache_ignore,
+    improvement_test_cache_ignore,
+    improvement_django_cache_ignore,
 ]
 
 
+# ---------------------------------------------------------------------------
+# Improvement selection
+# ---------------------------------------------------------------------------
+
+def get_logged_titles() -> set[str]:
+    if not LOG_FILE.exists():
+        return set()
+
+    titles: set[str] = set()
+
+    for line in LOG_FILE.read_text(
+        encoding="utf-8"
+    ).splitlines():
+
+        if not line.startswith("|"):
+            continue
+
+        columns = [part.strip() for part in line.split("|")]
+
+        if len(columns) >= 4:
+            titles.add(columns[2])
+
+    return titles
+
+
 def execute_catalog_improvement() -> tuple[str, list[str]]:
-    """Find and execute the next applicable catalog improvement."""
-    log_content = (
-        LOG_FILE.read_text(encoding="utf-8")
-        if LOG_FILE.exists()
-        else ""
-    )
+    """
+    Find the first improvement that has not already been verified.
+
+    IMPORTANT:
+    Improvement functions are only allowed to mutate the repository
+    when they know the improvement is applicable.
+    """
+    logged_titles = get_logged_titles()
 
     for improvement_func in CATALOG_IMPROVEMENTS:
+        before = run_command(
+            ["git", "status", "--porcelain"],
+            check=False,
+        ).stdout
+
         title, files = improvement_func()
 
         if not title:
+            after = run_command(
+                ["git", "status", "--porcelain"],
+                check=False,
+            ).stdout
+            if after != before:
+                raise RuntimeError(
+                    f"{improvement_func.__name__} modified the repository "
+                    "without returning an improvement."
+                )
             continue
 
-        if title in log_content:
-            # This improvement was already completed.
-            # Undo the candidate mutation before trying the next one.
-            rollback(get_current_commit())
+        if title in logged_titles:
+            for file_name in files:
+                run_command(
+                    ["git", "restore", "--", file_name],
+                    check=False,
+                )
             continue
 
         return title, files
@@ -443,8 +822,19 @@ def execute_catalog_improvement() -> tuple[str, list[str]]:
     return "", []
 
 
-def update_log(title: str, target_files: list[str]) -> None:
-    """Record a verified improvement."""
+# ---------------------------------------------------------------------------
+# Improvement log
+# ---------------------------------------------------------------------------
+
+def update_log(
+    title: str,
+    target_files: list[str],
+) -> None:
+    LOG_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
     today = datetime.datetime.now(
         datetime.timezone.utc
     ).strftime("%Y-%m-%d")
@@ -459,81 +849,93 @@ def update_log(title: str, target_files: list[str]) -> None:
         f"{files_str} | Verified |\n"
     )
 
+    content = ""
+
     if LOG_FILE.exists():
         content = LOG_FILE.read_text(
             encoding="utf-8"
         )
 
-        if not content.endswith("\n"):
-            content += "\n"
+    if content and not content.endswith("\n"):
+        content += "\n"
 
-        LOG_FILE.write_text(
-            content + entry,
-            encoding="utf-8",
-        )
+    LOG_FILE.write_text(
+        content + entry,
+        encoding="utf-8",
+    )
 
+
+# ---------------------------------------------------------------------------
+# Main engine
+# ---------------------------------------------------------------------------
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Autonomous Daily Improvement Engine"
+        description="Jarvis Autonomous Daily Improvement Engine"
     )
 
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate without committing or pushing",
+        help="Validate an improvement without committing",
     )
 
     parser.add_argument(
         "--check-only",
         action="store_true",
-        help="Run system validation only",
+        help="Run validation without applying improvements",
     )
 
     parser.add_argument(
         "--no-push",
         action="store_true",
-        help="Commit changes but do not push",
+        help="Commit locally but do not push",
     )
 
     args = parser.parse_args()
 
-    print(
-        "=== Jarvis Autonomous Daily Improvement Engine ==="
-    )
+    print("==============================================")
+    print(" Jarvis Autonomous Daily Improvement Engine")
+    print("==============================================")
 
-    # ---------------------------------------------------------
-    # 1. Require a clean starting point.
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Repository safety
+    # ------------------------------------------------------------------
 
-    print("Checking repository state...")
-
-    try:
-        ensure_clean_worktree()
-    except Exception as exc:
+    if not repository_is_clean():
         print(
-            f"Repository safety check failed: {exc}",
+            "Repository is not clean. "
+            "Refusing autonomous modification.",
             file=sys.stderr,
         )
         return 1
 
-    baseline_commit = get_current_commit()
+    baseline_commit = run_command(
+        ["git", "rev-parse", "HEAD"]
+    ).stdout.strip()
 
-    print(
-        f"Baseline commit: {baseline_commit}"
-    )
+    branch = run_command(
+        ["git", "branch", "--show-current"]
+    ).stdout.strip()
 
-    # ---------------------------------------------------------
-    # 2. Baseline validation.
-    # ---------------------------------------------------------
+    print(f"Branch: {branch}")
+    print(f"Baseline commit: {baseline_commit}")
 
-    print("Running baseline tests...")
+    if branch != "main":
+        print(
+            "Engine must operate directly on main.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # ------------------------------------------------------------------
+    # Baseline validation
+    # ------------------------------------------------------------------
+
+    print("Running baseline validation...")
 
     try:
         run_test_suite()
-        print(
-            "Baseline test suite passed successfully."
-        )
     except Exception as exc:
         print(
             f"Baseline validation failed: {exc}",
@@ -541,135 +943,86 @@ def main() -> int:
         )
         return 1
 
+    print("Baseline validation passed.")
+
     if args.check_only:
-        print(
-            "Repository is healthy and fully verified."
-        )
+        print("Check-only mode complete.")
         return 0
 
-    # ---------------------------------------------------------
-    # 3. Apply exactly one improvement.
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Select improvement
+    # ------------------------------------------------------------------
 
-    try:
-        title, target_files = execute_catalog_improvement()
-    except Exception as exc:
-        print(
-            f"Improvement generation failed: {exc}",
-            file=sys.stderr,
-        )
-
-        rollback(baseline_commit)
-        return 1
+    title, target_files = execute_catalog_improvement()
 
     if not title:
-        print(
-            "All catalog improvements are already applied."
-        )
-        print(
-            "Performing final system health check..."
-        )
-
-        try:
-            run_test_suite()
-        except Exception as exc:
-            print(
-                f"Health check failed: {exc}",
-                file=sys.stderr,
-            )
-            return 1
-
-        print(
-            "Daily repository maintenance completed."
-        )
+        print()
+        print("No unapplied safe improvement is currently available.")
+        print("Repository remains unchanged.")
+        print("Baseline validation passed.")
         return 0
 
-    print(
-        f"Applying minor improvement: {title}"
-    )
-    print(
-        f"Target files: {target_files}"
-    )
+    print()
+    print(f"Selected improvement: {title}")
+    print(f"Target files: {target_files}")
 
-    # ---------------------------------------------------------
-    # 4. Validate the improvement.
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Validate improvement
+    # ------------------------------------------------------------------
 
     try:
-        check_syntax(
-            [
-                file_name
-                for file_name in target_files
-                if file_name.endswith(".py")
-            ]
-        )
+        validate_improvement(target_files)
 
-        verify_security_and_limits(
-            target_files
-        )
-
-        run_test_suite()
-
-        print(
-            "Post-improvement validation passed."
-        )
+        print()
+        print("Post-improvement validation PASSED.")
 
     except Exception as exc:
+        print()
         print(
-            f"Validation failed after improvement: {exc}",
+            f"Validation FAILED: {exc}",
             file=sys.stderr,
         )
+        print("Initiating rollback...", file=sys.stderr)
 
-        print(
-            "Rejecting improvement and restoring baseline..."
-        )
+        if not rollback_to_baseline(baseline_commit):
+            return 2
 
-        rollback_success = rollback(
-            baseline_commit
-        )
+        print("Improvement rejected safely.")
+        return 0
 
-        if rollback_success:
-            print(
-                "Improvement rejected safely. "
-                "Repository remains unchanged."
-            )
-
-            # IMPORTANT:
-            # A rejected improvement is not a broken repository.
-            return 0
-
-        print(
-            "CRITICAL: automatic rollback failed. "
-            "Manual intervention required.",
-            file=sys.stderr,
-        )
-
-        return 1
-
-    # ---------------------------------------------------------
-    # 5. Dry run.
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Dry run
+    # ------------------------------------------------------------------
 
     if args.dry_run:
-        print(
-            "Dry run active. Rolling back validated improvement..."
-        )
+        print()
+        print("Dry-run mode enabled.")
+        print("Rolling back validated candidate...")
 
-        if rollback(baseline_commit):
-            print(
-                "Dry run completed successfully."
-            )
-            return 0
+        if not rollback_to_baseline(baseline_commit):
+            return 2
 
+        print("Dry run completed successfully.")
+        return 0
+
+    # ------------------------------------------------------------------
+    # Verify repository before commit
+    # ------------------------------------------------------------------
+
+    status = run_command(
+        ["git", "status", "--porcelain"]
+    ).stdout.strip()
+
+    if not status:
         print(
-            "Dry-run rollback failed.",
+            "Improvement produced no repository changes.",
             file=sys.stderr,
         )
         return 1
 
-    # ---------------------------------------------------------
-    # 6. Record verified improvement.
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Record verified improvement
+    # ------------------------------------------------------------------
 
     try:
         update_log(
@@ -677,79 +1030,89 @@ def main() -> int:
             target_files,
         )
 
-        run_command(
-            [
-                "git",
-                "add",
-                *target_files,
-                str(LOG_FILE.relative_to(ROOT)),
-            ]
-        )
+        log_file = str(LOG_FILE.relative_to(ROOT))
+        final_files = list(dict.fromkeys([*target_files, log_file]))
 
-        # Verify staged changes before committing.
+        # Validate the complete change that is about to be committed,
+        # including the generated improvement log entry.
+        check_syntax([f for f in final_files if f.endswith(".py")])
+        verify_security_and_limits(final_files)
+
+        # Make sure only intended files are staged.
+        run_command(["git", "add", "--", *final_files])
+
         staged = run_command(
             ["git", "diff", "--cached", "--name-only"],
-            check=True,
-        ).stdout.strip()
+            check=False,
+        ).stdout.splitlines()
 
-        if not staged:
-            print(
-                "No staged changes found. Nothing to commit."
+        if sorted(staged) != sorted(final_files):
+            raise RuntimeError(
+                "Unexpected files would be included in the commit: "
+                + ", ".join(staged)
             )
-            return 0
-
-        commit_msg = (
-            f"chore: daily improvement - "
-            f"{title} [skip ci]"
-        )
-
-        run_command(
-            ["git", "commit", "-m", commit_msg]
-        )
-
-        print(
-            f"Committed verified improvement: {commit_msg}"
-        )
 
     except Exception as exc:
         print(
-            f"Commit preparation failed: {exc}",
+            f"Final pre-commit validation failed: {exc}",
+            file=sys.stderr,
+        )
+        if not rollback_to_baseline(baseline_commit):
+            return 2
+        return 1
+
+    commit_message = (
+        f"chore: daily improvement - {title} [skip ci]"
+    )
+
+    commit = run_command(
+        ["git", "commit", "-m", commit_message],
+        check=False,
+    )
+
+    if commit.returncode != 0:
+        print(
+            "Commit failed.",
             file=sys.stderr,
         )
 
-        rollback(baseline_commit)
+        if not rollback_to_baseline(baseline_commit):
+            return 2
         return 1
 
-    # ---------------------------------------------------------
-    # 7. Push only after successful validation + commit.
-    # ---------------------------------------------------------
+    print()
+    print(f"Committed: {commit_message}")
 
-    if not args.no_push:
+    # ------------------------------------------------------------------
+    # Push directly to main
+    # ------------------------------------------------------------------
+
+    if args.no_push:
+        print("--no-push enabled. Commit retained locally.")
+        return 0
+
+    print("Pushing verified improvement directly to main...")
+
+    push = run_command(
+        ["git", "push", "origin", "main"],
+        check=False,
+    )
+
+    if push.returncode != 0:
         print(
-            "Pushing verified improvement to origin main..."
+            "Push failed:",
+            push.stderr.strip(),
+            file=sys.stderr,
         )
-
-        result = run_command(
-            ["git", "push", "origin", "main"],
-            check=False,
+        print(
+            "The verified commit remains local to this runner and was NOT "
+            "confirmed on origin/main.",
+            file=sys.stderr,
         )
+        return 1
 
-        if result.returncode != 0:
-            print(
-                "Push failed. The verified commit remains "
-                "locally available.",
-                file=sys.stderr,
-            )
-
-            print(
-                result.stderr.strip()
-                or result.stdout.strip(),
-                file=sys.stderr,
-            )
-
-            return 1
-
-        print("Push successful.")
+    print("Push successful.")
+    print("Daily improvement completed successfully.")
 
     return 0
 
